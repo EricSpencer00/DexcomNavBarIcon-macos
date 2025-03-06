@@ -4,7 +4,7 @@
 
 Dexcom Navigation Bar Icon on MacOS
 
-Using the pydexcom python package, view your Dexcom numbers in the top of your navigation bar on Mac
+Using the pydexcom python package, view your Dexcom numbers in the top of your navigation bar on Mac M1 chip or greater.
 
 Installation: 
 - Download the .dmg file
