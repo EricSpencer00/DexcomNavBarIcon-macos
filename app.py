@@ -61,7 +61,7 @@ class DexcomMenuApp(rumps.App):
             return
         self.username, self.password, self.region = creds
         self.authenticate()
-        self.persist_settings()
+        # self.persist_settings()
 
     def open_style_settings(self, _):
         new_style = get_style_settings(self.style_settings)
