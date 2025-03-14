@@ -21,7 +21,8 @@ DEFAULT_SETTINGS = {
     "preferences": {
         "low_threshold": 70.0,
         "high_threshold": 180.0,
-        "notifications": True
+        "notifications": True,
+        "units": "mgdl"
     }
 }
 

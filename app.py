@@ -137,7 +137,10 @@ class DexcomMenuApp(rumps.App):
                 else:
                     number_format = self.style_settings["number_normal"]
                     arrow_override = self.style_settings["arrow_steady"]
-                number_text = number_format % self.current_value
+                if self.preferences["units"] == "mgdl":
+                    number_text = number_format % self.current_value
+                else: # self.preferences["units"] == "mmol":
+                    number_text = number_format % (self.current_value * 0.0555)
                 if self.style_settings.get("show_brackets", True):
                     display_text = f"[{number_text}][{arrow_override}]"
                 else:

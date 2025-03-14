@@ -145,6 +145,7 @@ def get_preferences(current_prefs):
         width, height = 350, 120
         accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
+        units = ["mgdl", "mmol"]  
         labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):"]
         keys = ["low_threshold", "high_threshold", "notifications"]
         fields = {}
