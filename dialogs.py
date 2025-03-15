@@ -1,7 +1,13 @@
 # dialogs.py
 from Cocoa import (
-    NSAlert, NSTextField, NSSecureTextField, NSPopUpButton, NSView, NSMakeRect,
-    NSAlertFirstButtonReturn, NSApplication
+    NSAlert, # Dialog boxes with messages, buttons and accessory views
+    NSTextField, # Text fields for labels and input
+    NSSecureTextField, # Secure text fields for password input
+    NSPopUpButton, # Pop‐up menus for selecting from a list of items
+    NSView, # Container for other views
+    NSMakeRect, # Create a rectangle with origin and size
+    NSAlertFirstButtonReturn, # Return value for the first button in an alert
+    NSApplication # Access to the shared NSApplication instance
 )
 import logging
 
