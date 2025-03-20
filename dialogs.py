@@ -7,7 +7,8 @@ from Cocoa import (
     NSView, # Container for other views
     NSMakeRect, # Create a rectangle with origin and size
     NSAlertFirstButtonReturn, # Return value for the first button in an alert
-    NSApplication # Access to the shared NSApplication instance
+    NSApplication, # Access to the shared NSApplication instance
+    NSSlider
 )
 import logging
 
@@ -152,7 +153,7 @@ def get_preferences(current_prefs):
         accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
         units = ["mgdl", "mmol"]  
-        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):"]
+        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "mg/dL?"]
         keys = ["low_threshold", "high_threshold", "notifications"]
         fields = {}
 
