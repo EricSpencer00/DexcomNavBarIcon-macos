@@ -17,4 +17,4 @@ For more information on how to allow apps from unidentified developers, visit [t
 
 - Then, sign in with your Dexcom username and password along with your region
 
-![Screenshot 2025-03-05 at 12 59 37 PM](https://github.com/user-attachments/assets/f547bb49-6a3d-4d2d-a4f2-07099d0cc680)
+![Screenshot 2025-03-05 at 12 59 37 PM](https://github.com/user-attachments/assets/f547bb49-6a3d-4d2d-a4f2-07099d0cc680) 
