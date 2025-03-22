@@ -8,4 +8,4 @@ PySide==1.2.4
 PySide2==5.15.2.1
 PySide6==6.8.2.1
 sets==0.3.2
-matplotlib=3.10.1
+matplotlib==3.10.1
