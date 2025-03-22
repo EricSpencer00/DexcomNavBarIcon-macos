@@ -2,6 +2,13 @@
 import rumps
 import threading
 import logging
+import os
+import json
+import time
+import subprocess
+
+import numpy as np
+import matplotlib.pyplot as plt
 
 from Cocoa import (
     NSApplication, NSApplicationActivationPolicyAccessory, NSOperationQueue,
@@ -11,7 +18,7 @@ from pydexcom import Dexcom
 from pydexcom.errors import AccountError
 
 from dialogs import get_credentials, get_style_settings, get_preferences
-from settings import load_settings, save_settings, DEFAULT_SETTINGS
+from settings import load_settings, save_settings, DEFAULT_SETTINGS, get_settings_dir
 
 class DexcomMenuApp(rumps.App):
     def __init__(self):
@@ -42,6 +49,8 @@ class DexcomMenuApp(rumps.App):
         self.menu["Style"].set_callback(self.open_style_settings)
         self.menu.add("Preferences")
         self.menu["Preferences"].set_callback(self.open_preferences)
+        self.menu.add("Show Graph")
+        self.menu["Show Graph"].set_callback(self.show_history_graph)
 
         # If no account info, prompt for it.
         if not self.username or not self.password:
@@ -61,7 +70,7 @@ class DexcomMenuApp(rumps.App):
             return
         self.username, self.password, self.region = creds
         self.authenticate()
-        # self.persist_settings()
+        self.persist_settings()
 
     def open_style_settings(self, _):
         new_style = get_style_settings(self.style_settings)
@@ -83,33 +92,23 @@ class DexcomMenuApp(rumps.App):
         try:
             # Attempt Dexcom authentication
             self.dexcom = Dexcom(username=self.username, password=self.password, region=self.region)
-            # If we get here, authentication succeeded. Persist the (good) credentials now.
+            # Authentication succeeded; persist settings.
             self.persist_settings()
         except AccountError as e:
-            # If credentials are invalid, alert the user
             rumps.alert("Authentication Error", str(e))
-            
-            # Clear out the stored credentials so we don't keep reloading them
             self.username = ""
             self.password = ""
             self.dexcom = None
-            
-            # Persist the empty credentials so settings.json is no longer storing them
             self.persist_settings()
-            
-            # Prompt user to re-enter credentials
             self.open_account_settings(None)
         except Exception as e:
-            # Log any other unexpected error
             logging.error("Unexpected error during authentication: %s", e)
             self.dexcom = None
-
 
     def manual_update(self, _):
         self.update_data()
 
     def update_data(self, _=None):
-        # Start a new daemon thread to fetch data.
         thread = threading.Thread(target=self.fetch_data)
         thread.daemon = True
         thread.start()
@@ -123,24 +122,29 @@ class DexcomMenuApp(rumps.App):
             reading = self.dexcom.get_current_glucose_reading()
             if reading is not None:
                 self.current_value = reading.value
-                self.current_trend_arrow = reading.trend_arrow
+                # Update persistent history
+                self.update_history(reading)
+                # Use the full trend arrow provided by pydexcom.
+                arrow_override = reading.trend_arrow
                 try:
                     value = float(self.current_value)
                 except Exception:
                     value = 0
+                # Determine display value based on unit preference.
+                if self.preferences["units"].lower() == "mgdl":
+                    display_value = self.current_value
+                else:  # assume "mmol"
+                    display_value = self.current_value * 0.0555  # approximate conversion factor
+
+                # Choose number format based on thresholds.
                 if value < self.preferences["low_threshold"]:
                     number_format = self.style_settings["number_low"]
-                    arrow_override = self.style_settings["arrow_falling"]
                 elif value > self.preferences["high_threshold"]:
                     number_format = self.style_settings["number_high"]
-                    arrow_override = self.style_settings["arrow_rising"]
                 else:
                     number_format = self.style_settings["number_normal"]
-                    arrow_override = self.style_settings["arrow_steady"]
-                if self.preferences["units"] == "mgdl":
-                    number_text = number_format % self.current_value
-                else: # self.preferences["units"] == "mmol":
-                    number_text = number_format % (self.current_value * 0.0555)
+
+                number_text = number_format % display_value
                 if self.style_settings.get("show_brackets", True):
                     display_text = f"[{number_text}][{arrow_override}]"
                 else:
@@ -175,3 +179,98 @@ class DexcomMenuApp(rumps.App):
             "preferences": self.preferences
         }
         save_settings(settings)
+
+    # ----------------- New Methods for History, Prediction and Graphing -----------------
+
+    def update_history(self, reading):
+        """Append the current reading to a persistent history file."""
+        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
+        timestamp = time.time()
+        new_entry = {"timestamp": timestamp, "value": reading.value}
+        if os.path.exists(history_file):
+            try:
+                with open(history_file, "r") as f:
+                    history = json.load(f)
+            except Exception:
+                history = []
+        else:
+            history = []
+        history.append(new_entry)
+        # Optionally keep only the latest 100 entries.
+        history = history[-100:]
+        with open(history_file, "w") as f:
+            json.dump(history, f, indent=4)
+
+    def predict_future_readings(self, count=3):
+        """Predict the next 'count' glucose readings using a simple linear regression."""
+        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
+        if not os.path.exists(history_file):
+            return []
+        try:
+            with open(history_file, "r") as f:
+                history = json.load(f)
+        except Exception:
+            return []
+        if len(history) < 2:
+            if history:
+                return [history[-1]["value"]] * count
+            else:
+                return []
+        history.sort(key=lambda x: x["timestamp"])
+        times = np.array([entry["timestamp"] for entry in history])
+        values = np.array([entry["value"] for entry in history])
+        m, b = np.polyfit(times, values, 1)
+        last_time = times[-1]
+        avg_delta = np.mean(np.diff(times))
+        predictions = []
+        for i in range(1, count + 1):
+            future_time = last_time + i * avg_delta
+            pred_value = m * future_time + b
+            predictions.append(round(pred_value, 1))
+        return predictions
+
+    def generate_graph(self):
+        """Generate and save a graph of past glucose readings and predicted future values."""
+        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
+        if not os.path.exists(history_file):
+            return None
+        try:
+            with open(history_file, "r") as f:
+                history = json.load(f)
+        except Exception:
+            return None
+        if len(history) == 0:
+            return None
+        history.sort(key=lambda x: x["timestamp"])
+        times = np.array([entry["timestamp"] for entry in history])
+        values = np.array([entry["value"] for entry in history])
+        predictions = self.predict_future_readings(count=3)
+        last_time = times[-1]
+        avg_delta = np.mean(np.diff(times)) if len(times) > 1 else 300
+        future_times = np.array([last_time + (i + 1) * avg_delta for i in range(3)])
+        plt.figure(figsize=(8, 4))
+        plt.plot(times, values, marker="o", label="Past Readings")
+        if predictions:
+            plt.plot(future_times, predictions, marker="x", linestyle="--", label="Predictions")
+        plt.xlabel("Timestamp")
+        plt.ylabel("Glucose (mg/dL)")
+        plt.title("Glucose History and Future Predictions")
+        plt.legend()
+        plt.tight_layout()
+        graph_path = os.path.join(get_settings_dir(), "glucose_graph.png")
+        plt.savefig(graph_path)
+        plt.close()
+        return graph_path
+
+    def show_history_graph(self, _):
+        """Open the generated glucose graph in the default image viewer."""
+        graph_path = self.generate_graph()
+        if graph_path and os.path.exists(graph_path):
+            subprocess.Popen(["open", graph_path])
+        else:
+            rumps.alert("Graph Error", "No graph available.")
+
+if __name__ == "__main__":
+    from Cocoa import NSApplication, NSApplicationActivationPolicyAccessory
+    NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
+    DexcomMenuApp().run()

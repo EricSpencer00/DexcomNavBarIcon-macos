@@ -1,13 +1,13 @@
 # dialogs.py
 from Cocoa import (
-    NSAlert, # Dialog boxes with messages, buttons and accessory views
-    NSTextField, # Text fields for labels and input
-    NSSecureTextField, # Secure text fields for password input
-    NSPopUpButton, # Pop‐up menus for selecting from a list of items
-    NSView, # Container for other views
-    NSMakeRect, # Create a rectangle with origin and size
+    NSAlert,          # Dialog boxes with messages, buttons and accessory views
+    NSTextField,      # Text fields for labels and input
+    NSSecureTextField,# Secure text fields for password input
+    NSPopUpButton,    # Pop‐up menus for selecting from a list of items
+    NSView,           # Container for other views
+    NSMakeRect,       # Create a rectangle with origin and size
     NSAlertFirstButtonReturn, # Return value for the first button in an alert
-    NSApplication, # Access to the shared NSApplication instance
+    NSApplication,    # Access to the shared NSApplication instance
     NSSlider
 )
 import logging
@@ -140,24 +140,25 @@ def get_preferences(current_prefs):
     """
     Display a dialog for user preferences.
     Returns a dictionary of preferences if OK is pressed; else returns None.
+    Now includes an extra field for Units (mgdl or mmol).
     """
     try:
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Preferences")
-        alert.setInformativeText_("Set acceptable ranges and notifications.")
+        alert.setInformativeText_("Set acceptable ranges, notifications and units (mgdl or mmol).")
         alert.addButtonWithTitle_("OK")
         alert.addButtonWithTitle_("Cancel")
 
-        width, height = 350, 120
+        width, height = 350, 150
         accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
-        units = ["mgdl", "mmol"]  
-        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "mg/dL?"]
-        keys = ["low_threshold", "high_threshold", "notifications"]
+        # Define labels and keys (adding a new field for units)
+        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "Units (mgdl/mmol):"]
+        keys = ["low_threshold", "high_threshold", "notifications", "units"]
         fields = {}
 
-        y_start, delta = 90, 30
+        y_start, delta = 120, 30
         for i, label_text in enumerate(labels):
             label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_start - i * delta, 150, 22))
             label.setStringValue_(label_text)
@@ -166,6 +167,9 @@ def get_preferences(current_prefs):
             label.setDrawsBackground_(False)
             field = NSTextField.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
             default_value = str(current_prefs.get(keys[i], "")) if current_prefs else ""
+            # Provide default for units if not set.
+            if keys[i] == "units" and default_value == "":
+                default_value = "mgdl"
             field.setStringValue_(default_value)
             accessory.addSubview_(label)
             accessory.addSubview_(field)
@@ -184,6 +188,7 @@ def get_preferences(current_prefs):
             except Exception:
                 new_prefs["high_threshold"] = 180.0
             new_prefs["notifications"] = (str(fields["notifications"].stringValue()).lower() == "true")
+            new_prefs["units"] = str(fields["units"].stringValue()).lower()  # expects "mgdl" or "mmol"
             return new_prefs
         else:
             return None
