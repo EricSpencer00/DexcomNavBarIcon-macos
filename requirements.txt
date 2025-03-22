@@ -1,6 +1,6 @@
 compiler==0.2.0
 Image==1.5.33
-numpy==2.2.4
+numpy==2.0.2
 PyQt4==4.11.4
 PyQt5==5.15.11
 PyQt6==6.8.1
