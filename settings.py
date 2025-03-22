@@ -1,9 +1,16 @@
-# settings.py
 import json
 import os
 import logging
 
-SETTINGS_FILE = "settings.json"
+# Determine a persistent settings directory.
+def get_settings_dir():
+    # Expand to the user's Application Support directory.
+    base = os.path.expanduser("~/Library/Application Support")
+    app_dir = os.path.join(base, "DexcomNavBarIcon")
+    os.makedirs(app_dir, exist_ok=True)
+    return app_dir
+
+SETTINGS_FILE = os.path.join(get_settings_dir(), "settings.json")
 
 DEFAULT_SETTINGS = {
     "username": "",
@@ -22,7 +29,7 @@ DEFAULT_SETTINGS = {
         "low_threshold": 70.0,
         "high_threshold": 180.0,
         "notifications": True,
-        "units": "mgdl"
+        "units": "mg/dL"
     }
 }
 
