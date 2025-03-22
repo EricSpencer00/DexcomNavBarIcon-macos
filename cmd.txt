@@ -1,3 +1,6 @@
+# Run this first to convert Python code to an executable
+python setup.py py2app
+python setup.py py2app -A     # This will create the app in Alias mode,
+
+# Run this to create the .dmg
 hdiutil create -volname DexcomNavBarIcon -srcfolder dist/DexcomNavBarIcon.app -ov -format UDZO DexcomNavBarIcon.dmg
-python setup.py py2app -A
-python setup.py py2app  
