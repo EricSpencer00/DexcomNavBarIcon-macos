@@ -61,3 +61,11 @@ jobs:
       with:
         name: DexcomNavBarIcon-dmg
         path: DexcomNavBarIcon.dmg
+        
+    - name: Commit and push DMG
+      run: |
+        git config --global user.name 'GitHub Actions'
+        git config --global user.email 'actions@github.com'
+        git add DexcomNavBarIcon.dmg
+        git commit -m "Update DMG file [skip ci]" || echo "No changes to commit"
+        git push
