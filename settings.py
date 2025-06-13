@@ -3,19 +3,8 @@ import json
 import logging
 from utils import SecureStorage
 
-<<<<<<< HEAD
-def get_settings_dir():
-    # User’s Application Support folder
-    base = os.path.expanduser("~/Library/Application Support")
-    app_dir = os.path.join(base, "DexcomNavBarIcon")
-    os.makedirs(app_dir, exist_ok=True)
-    return app_dir
-
-SETTINGS_FILE = os.path.join(get_settings_dir(), "settings.json")
-=======
 SETTINGS_FILE = "settings.json"
 secure_storage = SecureStorage()
->>>>>>> 7dbff11 (better storage)
 
 DEFAULT_SETTINGS = {
     "username": "",
@@ -31,10 +20,27 @@ DEFAULT_SETTINGS = {
         "show_brackets": True
     },
     "preferences": {
+        # Glucose Ranges
         "low_threshold": 70.0,
         "high_threshold": 180.0,
+        "target_range_low": 80.0,
+        "target_range_high": 170.0,
+        # Update Settings
+        "update_frequency": 5,  # minutes
+        "auto_update": True,
+        "background_updates": True,
+        # Notifications
         "notifications": True,
-        "units": "mg/dL"   # New key for units, defaults to mg/dL
+        "sound_enabled": True,
+        "vibration_enabled": True,
+        "alert_on_high": True,
+        "alert_on_low": True,
+        # Data Management
+        "data_retention_days": 30,
+        "auto_export": False,
+        "export_format": "csv",
+        # Units
+        "units": "mg/dL"
     }
 }
 
@@ -54,6 +60,7 @@ def load_settings():
     return DEFAULT_SETTINGS.copy()
 
 def save_settings(settings):
+    """Save settings to SETTINGS_FILE."""
     try:
         # Create a copy of settings to encrypt
         settings_to_save = settings.copy()
