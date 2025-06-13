@@ -2,13 +2,7 @@
 import rumps
 import threading
 import logging
-import os
-import json
-import time
-import subprocess
-
-import numpy as np
-import matplotlib.pyplot as plt
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from Cocoa import (
     NSApplication, NSApplicationActivationPolicyAccessory, NSOperationQueue,
@@ -18,15 +12,28 @@ from pydexcom import Dexcom
 from pydexcom.errors import AccountError
 
 from dialogs import get_credentials, get_style_settings, get_preferences
-from settings import load_settings, save_settings, DEFAULT_SETTINGS, get_settings_dir
+from settings import load_settings, save_settings, DEFAULT_SETTINGS
+from utils import setup_logging, DexcomCache, check_internet, validate_reading
+from account_page import AccountPage
+from data_manager import GlucoseDataManager
+from statistics_view import StatisticsView
 
 class DexcomMenuApp(rumps.App):
     def __init__(self):
-        # Hide Dock icon.
+        # Setup logging
+        setup_logging()
+        logging.info("Initializing DexcomMenuApp")
+        
+        # Hide Dock icon
         NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
         super(DexcomMenuApp, self).__init__("Dexcom")
 
-        # Load settings.
+        # Initialize cache and data manager
+        self.cache = DexcomCache()
+        self.data_manager = GlucoseDataManager()
+        logging.info("Cache and data manager initialized")
+
+        # Load settings
         self.settings = load_settings()
         self.username = self.settings.get("username", "")
         self.password = self.settings.get("password", "")
@@ -34,34 +41,60 @@ class DexcomMenuApp(rumps.App):
         self.style_settings = self.settings.get("style_settings", DEFAULT_SETTINGS["style_settings"])
         self.preferences = self.settings.get("preferences", DEFAULT_SETTINGS["preferences"])
         self.dexcom = None
+        logging.info("Settings loaded")
 
         # Data display
         self.current_value = None
         self.current_trend_arrow = None
 
-        # Build menu items.
+        # Build menu items
         self.menu.clear()
         self.menu.add("Update Now")
         self.menu["Update Now"].set_callback(self.manual_update)
         self.menu.add("Account")
-        self.menu["Account"].set_callback(self.open_account_settings)
+        self.menu["Account"].set_callback(self.open_account_page)
+        self.menu.add("Statistics")
+        self.menu["Statistics"].set_callback(self.open_statistics)
         self.menu.add("Style")
         self.menu["Style"].set_callback(self.open_style_settings)
         self.menu.add("Preferences")
         self.menu["Preferences"].set_callback(self.open_preferences)
-        self.menu.add("Show Graph")
-        self.menu["Show Graph"].set_callback(self.show_history_graph)
+        logging.info("Menu items created")
 
-        # If no account info, prompt for it.
+        # If no account info, prompt for it
         if not self.username or not self.password:
+            logging.info("No credentials found, prompting user")
             self.open_account_settings(None)
         else:
+            logging.info("Found existing credentials, attempting authentication")
             self.authenticate()
 
-        # Fetch data immediately and set up a timer to update every 5 minutes.
+        # Fetch data immediately and set up a timer to update every 5 minutes
+        logging.info("Starting initial data fetch")
         self.update_data()
-        timer = rumps.Timer(self.update_data, 300)
+        timer = rumps.Timer(self.update_data, self.preferences.get("update_frequency", 5) * 60)
         timer.start()
+        logging.info("Update timer started")
+
+    def open_account_page(self, _):
+        if not self.username:
+            self.open_account_settings(None)
+            return
+            
+        account_page = AccountPage(
+            username=self.username,
+            region=self.region,
+            on_sign_out=self.sign_out
+        )
+        account_page.show()
+
+    def sign_out(self):
+        logging.info("Signing out user")
+        self.username = ""
+        self.password = ""
+        self.dexcom = None
+        self.persist_settings()
+        self.open_account_settings(None)
 
     def open_account_settings(self, _):
         creds = get_credentials()
@@ -70,7 +103,6 @@ class DexcomMenuApp(rumps.App):
             return
         self.username, self.password, self.region = creds
         self.authenticate()
-        self.persist_settings()
 
     def open_style_settings(self, _):
         new_style = get_style_settings(self.style_settings)
@@ -88,87 +120,199 @@ class DexcomMenuApp(rumps.App):
             self.refresh_display()
             self.persist_settings()
 
+    def open_statistics(self, _):
+        """Open the statistics view."""
+        stats_view = StatisticsView(self.data_manager)
+        stats_view.show()
+
     def authenticate(self):
         try:
             # Attempt Dexcom authentication
-            self.dexcom = Dexcom(username=self.username, password=self.password, region=self.region)
-            # Authentication succeeded; persist settings.
+            if self.region == "us":
+                self.dexcom = Dexcom(username=self.username, password=self.password)
+            else:
+                self.dexcom = Dexcom(username=self.username, password=self.password, ous=True)
+            # If we get here, authentication succeeded. Persist the (good) credentials now.
             self.persist_settings()
+            logging.info("Successfully authenticated with Dexcom")
         except AccountError as e:
+            # If credentials are invalid, alert the user
+            logging.error("Authentication failed: %s", str(e))
             rumps.alert("Authentication Error", str(e))
+            
+            # Clear out the stored credentials
             self.username = ""
             self.password = ""
             self.dexcom = None
+            
+            # Persist the empty credentials
             self.persist_settings()
+            
+            # Prompt user to re-enter credentials
             self.open_account_settings(None)
         except Exception as e:
+            # Log any other unexpected error
             logging.error("Unexpected error during authentication: %s", e)
             self.dexcom = None
 
     def manual_update(self, _):
+        logging.info("Manual update triggered")
         self.update_data()
 
     def update_data(self, _=None):
+        logging.info("update_data called")
+        if not check_internet():
+            logging.warning("No internet connection available")
+            self.refresh_display_with_text("[Offline]")
+            return
+        
+        # Start a new daemon thread to fetch data
+        logging.info("Starting fetch_data thread")
         thread = threading.Thread(target=self.fetch_data)
         thread.daemon = True
         thread.start()
 
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def fetch_data(self):
+        logging.info("fetch_data started")
         if not self.dexcom:
+            logging.info("No Dexcom instance, attempting authentication")
             self.authenticate()
             if not self.dexcom:
-                return
+                logging.error("Authentication failed")
+                raise Exception("Authentication failed")
+        
         try:
+            logging.info("Attempting to get current glucose reading")
             reading = self.dexcom.get_current_glucose_reading()
-            if reading is not None:
-                self.current_value = reading.value
-                # Update persistent history
-                self.update_history(reading)
-                # Use the full trend arrow provided by pydexcom.
-                arrow_override = reading.trend_arrow
-                try:
-                    value = float(self.current_value)
-                except Exception:
-                    value = 0
-                # Determine display value based on unit preference.
-                if self.preferences["units"].lower() == "mgdl":
-                    display_value = self.current_value
-                else:  # assume "mmol"
-                    display_value = self.current_value * 0.0555  # approximate conversion factor
-
-                # Choose number format based on thresholds.
-                if value < self.preferences["low_threshold"]:
-                    number_format = self.style_settings["number_low"]
-                elif value > self.preferences["high_threshold"]:
-                    number_format = self.style_settings["number_high"]
-                else:
-                    number_format = self.style_settings["number_normal"]
-
-                number_text = number_format % display_value
-                if self.style_settings.get("show_brackets", True):
-                    display_text = f"[{number_text}][{arrow_override}]"
-                else:
-                    display_text = f"{number_text} {arrow_override}"
+            logging.info(f"Received reading: {reading}")
+            
+            if not validate_reading(reading):
+                logging.error("Invalid reading received")
+                raise Exception("Invalid reading received")
+            
+            self.current_value = reading.value
+            self.current_trend_arrow = reading.trend_arrow
+            logging.info(f"Current value: {self.current_value}, Trend: {self.current_trend_arrow}")
+            
+            # Save reading to data manager
+            self.data_manager.save_reading(float(self.current_value), self.current_trend_arrow)
+            
+            # Cache the successful reading
+            self.cache.save({
+                "value": reading.value,
+                "trend_arrow": reading.trend_arrow
+            })
+            logging.info("Reading cached and saved")
+            
+            try:
+                value = float(self.current_value)
+            except Exception as e:
+                logging.error(f"Error converting value to float: {e}")
+                value = 0
+                
+            if value < self.preferences["low_threshold"]:
+                number_format = self.style_settings["number_low"]
+                arrow_override = self.style_settings["arrow_falling"]
+            elif value > self.preferences["high_threshold"]:
+                number_format = self.style_settings["number_high"]
+                arrow_override = self.style_settings["arrow_rising"]
             else:
-                display_text = "[N/A][?]"
+                number_format = self.style_settings["number_normal"]
+                arrow_override = self.style_settings["arrow_steady"]
+                
+            number_text = number_format % self.current_value
+            if self.style_settings.get("show_brackets", True):
+                display_text = f"[{number_text}][{arrow_override}]"
+            else:
+                display_text = f"{number_text} {arrow_override}"
+            
+            logging.info(f"Prepared display text: {display_text}")
+            NSOperationQueue.mainQueue().addOperationWithBlock_(
+                lambda: self.refresh_display_with_text(display_text)
+            )
+            
+            # Check if we need to send notifications
+            if self.preferences.get("notifications", False):
+                self._check_notifications(value)
+            
         except Exception as e:
-            logging.error("Error fetching Dexcom data: %s", e)
-            display_text = "[Err][?]"
+            logging.error(f"Error in fetch_data: {str(e)}")
+            # Try to use cached data if available
+            cached_data = self.cache.get()
+            if cached_data:
+                logging.info("Using cached data due to fetch error")
+                self.current_value = cached_data["value"]
+                self.current_trend_arrow = cached_data["trend_arrow"]
+                display_text = f"[{self.current_value}][{self.current_trend_arrow}]"
+                NSOperationQueue.mainQueue().addOperationWithBlock_(
+                    lambda: self.refresh_display_with_text(display_text)
+                )
+            else:
+                logging.error("No cached data available")
+                NSOperationQueue.mainQueue().addOperationWithBlock_(
+                    lambda: self.refresh_display_with_text("[Err][?]")
+                )
 
-        NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.refresh_display_with_text(display_text))
+    def _check_notifications(self, value):
+        """Check if notifications should be sent based on glucose value."""
+        if value < self.preferences.get("low_threshold", 70) and self.preferences.get("alert_on_low", True):
+            self._send_notification("Low Glucose Alert", f"Your glucose is low: {value}")
+        elif value > self.preferences.get("high_threshold", 180) and self.preferences.get("alert_on_high", True):
+            self._send_notification("High Glucose Alert", f"Your glucose is high: {value}")
+
+    def _send_notification(self, title, message):
+        """Send a notification with the specified title and message."""
+        try:
+            notification = rumps.Notification(
+                title=title,
+                message=message,
+                sound=self.preferences.get("sound_enabled", True)
+            )
+            notification.send()
+        except Exception as e:
+            logging.error(f"Error sending notification: {e}")
 
     def refresh_display_with_text(self, text):
+        logging.info(f"Refreshing display with text: {text}")
         try:
-            value = float(self.current_value)
-        except Exception:
+            value = float(self.current_value) if self.current_value else 0
+        except Exception as e:
+            logging.error(f"Error converting value in refresh_display: {e}")
             value = 0
-        color = NSColor.redColor() if (value > self.preferences["high_threshold"] or value < self.preferences["low_threshold"]) else NSColor.blackColor()
-        attributes = {"NSForegroundColorAttributeName": color, "NSFont": NSFont.systemFontOfSize_(12)}
+            
+        # Add status indicator
+        status_indicators = {
+            "normal": "●",
+            "high": "▲",
+            "low": "▼"
+        }
+        
+        if value > self.preferences["high_threshold"]:
+            status = "high"
+            color = NSColor.redColor()
+        elif value < self.preferences["low_threshold"]:
+            status = "low"
+            color = NSColor.redColor()
+        else:
+            status = "normal"
+            color = NSColor.blackColor()
+            
+        text = f"{status_indicators[status]} {text}"
+        logging.info(f"Final display text: {text}")
+        
+        attributes = {
+            "NSForegroundColorAttributeName": color,
+            "NSFont": NSFont.systemFontOfSize_(12)
+        }
         attributed_title = NSAttributedString.alloc().initWithString_attributes_(text, attributes)
+        
         if hasattr(self, '_status_item') and self._status_item.button:
             self._status_item.button.setAttributedTitle_(attributed_title)
+            logging.info("Display updated via status item")
         else:
             self.title = text
+            logging.info("Display updated via title")
 
     def persist_settings(self):
         settings = {
@@ -178,99 +322,16 @@ class DexcomMenuApp(rumps.App):
             "style_settings": self.style_settings,
             "preferences": self.preferences
         }
-        save_settings(settings)
-
-    # ----------------- New Methods for History, Prediction and Graphing -----------------
-
-    def update_history(self, reading):
-        """Append the current reading to a persistent history file."""
-        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
-        timestamp = time.time()
-        new_entry = {"timestamp": timestamp, "value": reading.value}
-        if os.path.exists(history_file):
-            try:
-                with open(history_file, "r") as f:
-                    history = json.load(f)
-            except Exception:
-                history = []
+        if save_settings(settings):
+            logging.info("Settings saved successfully")
         else:
-            history = []
-        history.append(new_entry)
-        # Optionally keep only the latest 100 entries.
-        history = history[-100:]
-        with open(history_file, "w") as f:
-            json.dump(history, f, indent=4)
+            logging.error("Failed to save settings")
 
-    def predict_future_readings(self, count=3):
-        """Predict the next 'count' glucose readings using a simple linear regression."""
-        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
-        if not os.path.exists(history_file):
-            return []
+    def cleanup(self):
+        """Clean up old data based on retention settings."""
         try:
-            with open(history_file, "r") as f:
-                history = json.load(f)
-        except Exception:
-            return []
-        if len(history) < 2:
-            if history:
-                return [history[-1]["value"]] * count
-            else:
-                return []
-        history.sort(key=lambda x: x["timestamp"])
-        times = np.array([entry["timestamp"] for entry in history])
-        values = np.array([entry["value"] for entry in history])
-        m, b = np.polyfit(times, values, 1)
-        last_time = times[-1]
-        avg_delta = np.mean(np.diff(times))
-        predictions = []
-        for i in range(1, count + 1):
-            future_time = last_time + i * avg_delta
-            pred_value = m * future_time + b
-            predictions.append(round(pred_value, 1))
-        return predictions
-
-    def generate_graph(self):
-        """Generate and save a graph of past glucose readings and predicted future values."""
-        history_file = os.path.join(get_settings_dir(), "glucose_history.json")
-        if not os.path.exists(history_file):
-            return None
-        try:
-            with open(history_file, "r") as f:
-                history = json.load(f)
-        except Exception:
-            return None
-        if len(history) == 0:
-            return None
-        history.sort(key=lambda x: x["timestamp"])
-        times = np.array([entry["timestamp"] for entry in history])
-        values = np.array([entry["value"] for entry in history])
-        predictions = self.predict_future_readings(count=3)
-        last_time = times[-1]
-        avg_delta = np.mean(np.diff(times)) if len(times) > 1 else 300
-        future_times = np.array([last_time + (i + 1) * avg_delta for i in range(3)])
-        plt.figure(figsize=(8, 4))
-        plt.plot(times, values, marker="o", label="Past Readings")
-        if predictions:
-            plt.plot(future_times, predictions, marker="x", linestyle="--", label="Predictions")
-        plt.xlabel("Timestamp")
-        plt.ylabel("Glucose (mg/dL)")
-        plt.title("Glucose History and Future Predictions")
-        plt.legend()
-        plt.tight_layout()
-        graph_path = os.path.join(get_settings_dir(), "glucose_graph.png")
-        plt.savefig(graph_path)
-        plt.close()
-        return graph_path
-
-    def show_history_graph(self, _):
-        """Open the generated glucose graph in the default image viewer."""
-        graph_path = self.generate_graph()
-        if graph_path and os.path.exists(graph_path):
-            subprocess.Popen(["open", graph_path])
-        else:
-            rumps.alert("Graph Error", "No graph available.")
-
-if __name__ == "__main__":
-    from Cocoa import NSApplication, NSApplicationActivationPolicyAccessory
-    NSApplication.sharedApplication().setActivationPolicy_(NSApplicationActivationPolicyAccessory)
-    DexcomMenuApp().run()
+            retention_days = self.preferences.get("data_retention_days", 30)
+            self.data_manager.cleanup_old_data(retention_days)
+            logging.info(f"Cleaned up data older than {retention_days} days")
+        except Exception as e:
+            logging.error(f"Error during cleanup: {e}")
