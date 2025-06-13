@@ -1,6 +1,9 @@
-numpy==2.0.2
-pydexcom==0.4.1
+pydexcom==0.4.0
 pyobjc_framework_Cocoa==11.0
 rumps==0.4.0
 setuptools==58.0.4
+cryptography
+tenacity
+pandas
+numpy
 matplotlib==3.9.4
