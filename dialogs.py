@@ -8,9 +8,12 @@ from Cocoa import (
     NSMakeRect,       # Create a rectangle with origin and size
     NSAlertFirstButtonReturn, # Return value for the first button in an alert
     NSApplication,    # Access to the shared NSApplication instance
-    NSSlider
+    NSSlider,
+    NSScrollView,
+    NSTextView,
 )
 import logging
+
 
 def get_credentials():
     """
@@ -86,6 +89,7 @@ def get_credentials():
         logging.error("Error in get_credentials dialog: %s", e)
         return None, None, None
 
+
 def get_style_settings(current_style):
     """
     Display a dialog for style settings.
@@ -136,25 +140,26 @@ def get_style_settings(current_style):
         logging.error("Error in get_style_settings dialog: %s", e)
         return None
 
+
 def get_preferences(current_prefs):
     """
     Display a dialog for user preferences.
     Returns a dictionary of preferences if OK is pressed; else returns None.
-    Now includes an extra field for Units (mgdl or mmol).
+    Now uses a dropdown for Units instead of a text box.
     """
     try:
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Preferences")
-        alert.setInformativeText_("Set acceptable ranges, notifications and units (mgdl or mmol).")
+        alert.setInformativeText_("Set acceptable ranges, notifications and units.")
         alert.addButtonWithTitle_("OK")
         alert.addButtonWithTitle_("Cancel")
 
         width, height = 350, 150
         accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
-        # Define labels and keys (adding a new field for units)
-        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "Units (mgdl/mmol):"]
+        # Define labels and keys (units becomes a popup)
+        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "Units:"]
         keys = ["low_threshold", "high_threshold", "notifications", "units"]
         fields = {}
 
@@ -165,15 +170,25 @@ def get_preferences(current_prefs):
             label.setEditable_(False)
             label.setBezeled_(False)
             label.setDrawsBackground_(False)
-            field = NSTextField.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
-            default_value = str(current_prefs.get(keys[i], "")) if current_prefs else ""
-            # Provide default for units if not set.
-            if keys[i] == "units" and default_value == "":
-                default_value = "mgdl"
-            field.setStringValue_(default_value)
             accessory.addSubview_(label)
-            accessory.addSubview_(field)
-            fields[keys[i]] = field
+
+            key = keys[i]
+            if key == "units":
+                popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
+                popup.addItemsWithTitles_(["mg/dL", "mmol"])
+                current_units = str((current_prefs or {}).get("units", "mg/dL")).lower()
+                if current_units.startswith("mmol"):
+                    popup.selectItemWithTitle_("mmol")
+                else:
+                    popup.selectItemWithTitle_("mg/dL")
+                accessory.addSubview_(popup)
+                fields[key] = popup
+            else:
+                field = NSTextField.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
+                default_value = str(current_prefs.get(key, "")) if current_prefs else ""
+                field.setStringValue_(default_value)
+                accessory.addSubview_(field)
+                fields[key] = field
 
         alert.setAccessoryView_(accessory)
         response = alert.runModal()
@@ -188,10 +203,54 @@ def get_preferences(current_prefs):
             except Exception:
                 new_prefs["high_threshold"] = 180.0
             new_prefs["notifications"] = (str(fields["notifications"].stringValue()).lower() == "true")
-            new_prefs["units"] = str(fields["units"].stringValue()).lower()  # expects "mgdl" or "mmol"
+            # Units from popup
+            new_prefs["units"] = str(fields["units"].titleOfSelectedItem())
             return new_prefs
         else:
             return None
     except Exception as e:
         logging.error("Error in get_preferences dialog: %s", e)
         return None
+
+
+def show_text_window(title: str, text: str):
+    """Show a scrollable text window (via NSAlert with accessory view)."""
+    try:
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(title)
+        alert.addButtonWithTitle_("OK")
+
+        width, height = 600, 400
+        scroll = NSScrollView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
+        scroll.setHasVerticalScroller_(True)
+        scroll.setHasHorizontalScroller_(False)
+
+        text_view = NSTextView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
+        text_view.setEditable_(False)
+        text_view.setString_(text or "")
+        text_view.setDrawsBackground_(True)
+
+        scroll.setDocumentView_(text_view)
+        alert.setAccessoryView_(scroll)
+        alert.runModal()
+    except Exception as e:
+        logging.error("Error showing text window: %s", e)
+
+
+def show_account_info(username: str) -> bool:
+    """Show account info. Returns True if user chose to sign out."""
+    try:
+        NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
+        alert = NSAlert.alloc().init()
+        title = f"Signed in as {username}" if username else "Account"
+        alert.setMessageText_(title)
+        alert.setInformativeText_("You are currently signed in.")
+        alert.addButtonWithTitle_("OK")
+        alert.addButtonWithTitle_("Sign Out")
+        response = alert.runModal()
+        # In NSAlert, first button is OK. Second button indicates sign out.
+        return response != NSAlertFirstButtonReturn
+    except Exception as e:
+        logging.error("Error showing account info: %s", e)
+        return False
