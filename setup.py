@@ -5,16 +5,17 @@ Usage:
     python setup.py py2app
 """
 
-from setuptools import setup
 
-APP = ['main_simplified.py']
+from setuptools import setup, find_packages
+
+APP = ['main.py']
 DATA_FILES = [
     ('resources', ['resources/icon.icns']),
 ]
 OPTIONS = {
     'argv_emulation': False,
-    'packages': ['rumps', 'pydexcom', 'cryptography', 'tenacity', 'charset_normalizer'],
-    'includes': ['cmath', 'chardet'],
+    'packages': find_packages() + ['cffi'],
+    'includes': ['cmath', 'chardet', 'cffi'],
     'iconfile': 'resources/icon.icns',
     'plist': {
         'CFBundleName': 'DexcomNavBarIcon',
@@ -54,5 +55,7 @@ setup(
         'setuptools>=58.0.4',
         'cryptography',
         'tenacity',
+        'cffi',
     ],
+    package_dir={'': '.'},
 )

@@ -1,6 +1,6 @@
 import os
 import json
-from utils_simplified import SecureStorage
+from src.utils import SecureStorage
 
 SETTINGS_FILE = "settings.json"
 secure_storage = SecureStorage()
