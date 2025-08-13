@@ -17,7 +17,7 @@ import logging
 
 def get_credentials():
     """
-    Display a sign‐in dialog with fields for username, password, and region.
+    Display a sign-in dialog with fields for username, password, and region.
     Returns (username, password, region) if OK is pressed; otherwise, returns (None, None, None).
     """
     try:
@@ -151,19 +151,19 @@ def get_preferences(current_prefs):
         NSApplication.sharedApplication().activateIgnoringOtherApps_(True)
         alert = NSAlert.alloc().init()
         alert.setMessageText_("Preferences")
-        alert.setInformativeText_("Set acceptable ranges, notifications and units.")
+        alert.setInformativeText_("Set acceptable ranges, notifications, units, and brackets style.")
         alert.addButtonWithTitle_("OK")
         alert.addButtonWithTitle_("Cancel")
 
-        width, height = 350, 150
+        width, height = 350, 190
         accessory = NSView.alloc().initWithFrame_(NSMakeRect(0, 0, width, height))
 
-        # Define labels and keys (units becomes a popup)
-        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "Units:"]
-        keys = ["low_threshold", "high_threshold", "notifications", "units"]
+        # Define labels and keys (units becomes a popup, show_brackets is a switch)
+        labels = ["Low Threshold:", "High Threshold:", "Notifications (true/false):", "Units:", "Show Brackets:"]
+        keys = ["low_threshold", "high_threshold", "notifications", "units", "show_brackets"]
         fields = {}
 
-        y_start, delta = 120, 30
+        y_start, delta = 160, 30
         for i, label_text in enumerate(labels):
             label = NSTextField.alloc().initWithFrame_(NSMakeRect(0, y_start - i * delta, 150, 22))
             label.setStringValue_(label_text)
@@ -183,12 +183,26 @@ def get_preferences(current_prefs):
                     popup.selectItemWithTitle_("mg/dL")
                 accessory.addSubview_(popup)
                 fields[key] = popup
+            elif key == "show_brackets":
+                # Use a popup for true/false
+                popup = NSPopUpButton.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
+                popup.addItemsWithTitles_(["Yes", "No"])
+                val = (current_prefs or {}).get("show_brackets", True)
+                if val in (False, "false", "no", 0):
+                    popup.selectItemWithTitle_("No")
+                else:
+                    popup.selectItemWithTitle_("Yes")
+                accessory.addSubview_(popup)
+                fields[key] = popup
             else:
                 field = NSTextField.alloc().initWithFrame_(NSMakeRect(160, y_start - i * delta, 180, 22))
                 default_value = str(current_prefs.get(key, "")) if current_prefs else ""
                 field.setStringValue_(default_value)
                 accessory.addSubview_(field)
                 fields[key] = field
+
+        # Track last units to auto-update thresholds
+        last_units = str((current_prefs or {}).get("units", "mg/dL")).lower()
 
         alert.setAccessoryView_(accessory)
         response = alert.runModal()
@@ -204,7 +218,20 @@ def get_preferences(current_prefs):
                 new_prefs["high_threshold"] = 180.0
             new_prefs["notifications"] = (str(fields["notifications"].stringValue()).lower() == "true")
             # Units from popup
-            new_prefs["units"] = str(fields["units"].titleOfSelectedItem())
+            new_units = str(fields["units"].titleOfSelectedItem())
+            new_prefs["units"] = new_units
+            # Show brackets from popup
+            show_brackets_val = str(fields["show_brackets"].titleOfSelectedItem())
+            new_prefs["show_brackets"] = (show_brackets_val == "Yes")
+
+            # If units changed, auto-update thresholds to common defaults
+            if new_units.lower().startswith("mmol") and not last_units.startswith("mmol"):
+                new_prefs["low_threshold"] = 3.9
+                new_prefs["high_threshold"] = 10.0
+            elif new_units.lower().startswith("mg/dl") and not last_units.startswith("mg/dl"):
+                new_prefs["low_threshold"] = 70.0
+                new_prefs["high_threshold"] = 180.0
+
             return new_prefs
         else:
             return None

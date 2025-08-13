@@ -128,6 +128,10 @@ class DexcomMenuApp(rumps.App):
     def open_preferences(self, _):
         new_prefs = get_preferences(self.preferences)
         if new_prefs:
+            # Update style_settings show_brackets if present in prefs
+            if "show_brackets" in new_prefs:
+                self.style_settings["show_brackets"] = new_prefs["show_brackets"]
+                del new_prefs["show_brackets"]
             self.preferences = new_prefs
             rumps.alert("Preferences Updated", "New preferences have been applied.")
             self.refresh_display()
@@ -240,7 +244,11 @@ class DexcomMenuApp(rumps.App):
             numeric = 0.0
 
         units = self._units_normalized()
-        display_value = numeric if units == "mgdl" else round(numeric * 0.0555, 1)
+        if units == "mgdl":
+            # Show as int, no .0
+            display_value = int(round(numeric))
+        else:
+            display_value = round(numeric * 0.0555, 1)
 
         # Choose number format based on thresholds.
         low = float(self.preferences.get("low_threshold", 70))
