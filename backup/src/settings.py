@@ -1,6 +1,7 @@
 import os
 import json
-from utils_simplified import SecureStorage
+import logging
+from utils import SecureStorage
 
 SETTINGS_FILE = "settings.json"
 secure_storage = SecureStorage()
@@ -10,7 +11,9 @@ DEFAULT_SETTINGS = {
     "password": "",
     "region": "us",
     "style_settings": {
-        "number_format": "%s",
+        "number_low": "Low: %s",
+        "number_normal": "Normal: %s",
+        "number_high": "High: %s",
         "arrow_steady": "→",
         "arrow_rising": "↑",
         "arrow_falling": "↓",
@@ -20,10 +23,24 @@ DEFAULT_SETTINGS = {
         # Glucose Ranges
         "low_threshold": 70.0,
         "high_threshold": 180.0,
+        "target_range_low": 80.0,
+        "target_range_high": 170.0,
         # Update Settings
         "update_frequency": 5,  # minutes
+        "auto_update": True,
+        "background_updates": True,
+        # Notifications
+        "notifications": True,
+        "sound_enabled": True,
+        "vibration_enabled": True,
+        "alert_on_high": True,
+        "alert_on_low": True,
+        # Data Management
+        "data_retention_days": 30,
+        "auto_export": False,
+        "export_format": "csv",
         # Units
-        "units": "mg/dL"  # or "mmol/L"
+        "units": "mg/dL"
     }
 }
 
@@ -39,7 +56,7 @@ def load_settings():
                     settings["password"] = secure_storage.decrypt(settings["password"])
                 return settings
         except Exception as e:
-            print(f"Error loading settings: {e}")
+            logging.error("Error loading settings: %s", e)
     return DEFAULT_SETTINGS.copy()
 
 def save_settings(settings):
@@ -56,7 +73,5 @@ def save_settings(settings):
         
         with open(SETTINGS_FILE, "w") as f:
             json.dump(settings_to_save, f, indent=4)
-        return True
     except Exception as e:
-        print(f"Error saving settings: {e}")
-        return False
+        logging.error("Error saving settings: %s", e)

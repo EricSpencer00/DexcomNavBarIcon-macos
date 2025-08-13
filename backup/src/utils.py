@@ -1,8 +1,27 @@
+import logging
+import logging.handlers
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from cryptography.fernet import Fernet
 import socket
+
+# Logging setup
+def setup_logging():
+    log_dir = "logs"
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    
+    log_file = os.path.join(log_dir, "dexcom_app.log")
+    handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=1024*1024, backupCount=5
+    )
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    handler.setFormatter(formatter)
+    logging.getLogger().addHandler(handler)
+    logging.getLogger().setLevel(logging.INFO)
 
 # Secure storage for credentials
 class SecureStorage:
@@ -51,7 +70,7 @@ class DexcomCache:
         if not self.cache["last_update"]:
             return None
         last_update = datetime.fromisoformat(self.cache["last_update"])
-        if datetime.now() - last_update > datetime.timedelta(minutes=5):
+        if datetime.now() - last_update > timedelta(minutes=5):
             return None
         return self.cache["data"]
 
@@ -74,4 +93,4 @@ def validate_reading(reading):
             return False
         return True
     except (ValueError, AttributeError):
-        return False
+        return False 

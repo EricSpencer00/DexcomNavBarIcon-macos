@@ -44,4 +44,4 @@ class AccountPage:
         response = alert.runModal()
         
         if response == 1000:  # Sign Out button
-            self.on_sign_out()
+            self.on_sign_out() 
