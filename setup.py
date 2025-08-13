@@ -16,7 +16,13 @@ OPTIONS = {
         'LSApplicationCategoryType': 'public.app-category.healthcare-fitness',
     },
     'excludes': ['tkinter', 'pytest', 'tests'],
-    'includes': ['keyring', 'keyring.backends', 'keyring.backends.OS_X', 'charset_normalizer'],
+    'includes': [
+        'keyring',
+        'keyring.backends',
+        'keyring.backends.OS_X',
+        'keyring.backends.macOS',  # Ensure macOS Keychain backend is bundled
+        'charset_normalizer'
+    ],
     'packages': ['requests', 'pydexcom', 'matplotlib', 'numpy'],
 }
 
