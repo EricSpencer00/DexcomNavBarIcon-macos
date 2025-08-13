@@ -6,19 +6,22 @@ import os
 import json
 import time
 import subprocess
+import re
 
+import matplotlib
+matplotlib.use('Agg')
 import numpy as np
 import matplotlib.pyplot as plt
 
 from Cocoa import (
     NSApplication, NSApplicationActivationPolicyAccessory, NSOperationQueue,
-    NSColor, NSAttributedString, NSFont
 )
 from pydexcom import Dexcom
 from pydexcom.errors import AccountError
 
 from dialogs import get_credentials, get_style_settings, get_preferences
 from settings import load_settings, save_settings, DEFAULT_SETTINGS, get_settings_dir
+from keychain import get_password, set_password, delete_password
 
 class DexcomMenuApp(rumps.App):
     def __init__(self):
@@ -29,7 +32,8 @@ class DexcomMenuApp(rumps.App):
         # Load settings.
         self.settings = load_settings()
         self.username = self.settings.get("username", "")
-        self.password = self.settings.get("password", "")
+        # Retrieve password from Keychain instead of file
+        self.password = get_password(self.username) or ""
         self.region = self.settings.get("region", "us")
         self.style_settings = self.settings.get("style_settings", DEFAULT_SETTINGS["style_settings"])
         self.preferences = self.settings.get("preferences", DEFAULT_SETTINGS["preferences"])
@@ -51,6 +55,12 @@ class DexcomMenuApp(rumps.App):
         self.menu["Preferences"].set_callback(self.open_preferences)
         self.menu.add("Show Graph")
         self.menu["Show Graph"].set_callback(self.show_history_graph)
+        self.menu.add("Clear Data")
+        self.menu["Clear Data"].set_callback(self.clear_local_data)
+        self.menu.add("Sign Out")
+        self.menu["Sign Out"].set_callback(self.sign_out)
+        self.menu.add("Privacy Policy")
+        self.menu["Privacy Policy"].set_callback(lambda _: subprocess.Popen(["open", "https://github.com/EricSpencer00/DexcomNavBarIcon-macos/blob/main/PRIVACY.md"]))
 
         # If no account info, prompt for it.
         if not self.username or not self.password:
@@ -60,8 +70,30 @@ class DexcomMenuApp(rumps.App):
 
         # Fetch data immediately and set up a timer to update every 5 minutes.
         self.update_data()
-        timer = rumps.Timer(self.update_data, 300)
-        timer.start()
+        self.timer = rumps.Timer(self.update_data, 300)
+        self.timer.start()
+
+    def sign_out(self, _=None):
+        try:
+            delete_password(self.username)
+        except Exception:
+            pass
+        self.username = ""
+        self.password = ""
+        self.dexcom = None
+        self.persist_settings()
+        rumps.notification("Signed Out", "", "Credentials cleared.")
+        self.open_account_settings(None)
+
+    def clear_local_data(self, _=None):
+        try:
+            history_file = os.path.join(get_settings_dir(), "glucose_history.json")
+            if os.path.exists(history_file):
+                os.remove(history_file)
+            rumps.notification("Data Cleared", "", "Local history was deleted.")
+        except Exception as e:
+            logging.error("Failed to clear data: %s", e)
+            rumps.alert("Error", "Could not clear local data.")
 
     def open_account_settings(self, _):
         creds = get_credentials()
@@ -69,6 +101,11 @@ class DexcomMenuApp(rumps.App):
             rumps.alert("Setup Cancelled", "Credentials are required.")
             return
         self.username, self.password, self.region = creds
+        # Store password securely in Keychain
+        try:
+            set_password(self.username, self.password)
+        except Exception as e:
+            logging.error("Failed to save password to Keychain: %s", e)
         self.authenticate()
         self.persist_settings()
 
@@ -91,11 +128,20 @@ class DexcomMenuApp(rumps.App):
     def authenticate(self):
         try:
             # Attempt Dexcom authentication
-            self.dexcom = Dexcom(username=self.username, password=self.password, region=self.region)
-            # Authentication succeeded; persist settings.
+            # pydexcom uses 'ous=True' for outside-US regions
+            if str(self.region).lower() in ("us", "usa", "united states"):
+                self.dexcom = Dexcom(username=self.username, password=self.password)
+            else:
+                self.dexcom = Dexcom(username=self.username, password=self.password, ous=True)
+            # Authentication succeeded; persist settings (without password).
             self.persist_settings()
         except AccountError as e:
             rumps.alert("Authentication Error", str(e))
+            # Clear stored password
+            try:
+                delete_password(self.username)
+            except Exception:
+                pass
             self.username = ""
             self.password = ""
             self.dexcom = None
@@ -122,33 +168,11 @@ class DexcomMenuApp(rumps.App):
             reading = self.dexcom.get_current_glucose_reading()
             if reading is not None:
                 self.current_value = reading.value
+                self.current_trend_arrow = getattr(reading, "trend_arrow", None)
                 # Update persistent history
                 self.update_history(reading)
-                # Use the full trend arrow provided by pydexcom.
-                arrow_override = reading.trend_arrow
-                try:
-                    value = float(self.current_value)
-                except Exception:
-                    value = 0
-                # Determine display value based on unit preference.
-                if self.preferences["units"].lower() == "mgdl":
-                    display_value = self.current_value
-                else:  # assume "mmol"
-                    display_value = self.current_value * 0.0555  # approximate conversion factor
-
-                # Choose number format based on thresholds.
-                if value < self.preferences["low_threshold"]:
-                    number_format = self.style_settings["number_low"]
-                elif value > self.preferences["high_threshold"]:
-                    number_format = self.style_settings["number_high"]
-                else:
-                    number_format = self.style_settings["number_normal"]
-
-                number_text = number_format % display_value
-                if self.style_settings.get("show_brackets", True):
-                    display_text = f"[{number_text}][{arrow_override}]"
-                else:
-                    display_text = f"{number_text} {arrow_override}"
+                # Prepare display text
+                display_text = self._format_display_text(self.current_value, self.current_trend_arrow)
             else:
                 display_text = "[N/A][?]"
         except Exception as e:
@@ -157,30 +181,78 @@ class DexcomMenuApp(rumps.App):
 
         NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.refresh_display_with_text(display_text))
 
-    def refresh_display_with_text(self, text):
+    def _units_normalized(self):
+        # Normalize units like "mg/dL", "mgdl", "MGDL" -> "mgdl"; "mmol", "mmol/L" -> "mmol"
+        units = str(self.preferences.get("units", "mgdl"))
+        units = re.sub(r"[^a-z]", "", units.lower())
+        if units.startswith("mmol"):
+            return "mmol"
+        return "mgdl"
+
+    def get_arrow_symbol(self, trend_arrow):
+        # Map Dexcom trend to configured arrows
+        arrow_map = {
+            "FLAT": self.style_settings.get("arrow_steady", "→"),
+            "DOUBLE_UP": self.style_settings.get("arrow_rising", "↑"),
+            "SINGLE_UP": self.style_settings.get("arrow_rising", "↑"),
+            "FORTY_FIVE_UP": self.style_settings.get("arrow_rising", "↑"),
+            "DOUBLE_DOWN": self.style_settings.get("arrow_falling", "↓"),
+            "SINGLE_DOWN": self.style_settings.get("arrow_falling", "↓"),
+            "FORTY_FIVE_DOWN": self.style_settings.get("arrow_falling", "↓"),
+        }
+        if not trend_arrow:
+            return "?"
+        key = str(trend_arrow).upper()
+        return arrow_map.get(key, str(trend_arrow))
+
+    def _format_display_text(self, value, trend_arrow):
         try:
-            value = float(self.current_value)
+            numeric = float(value)
         except Exception:
-            value = 0
-        color = NSColor.redColor() if (value > self.preferences["high_threshold"] or value < self.preferences["low_threshold"]) else NSColor.blackColor()
-        attributes = {"NSForegroundColorAttributeName": color, "NSFont": NSFont.systemFontOfSize_(12)}
-        attributed_title = NSAttributedString.alloc().initWithString_attributes_(text, attributes)
-        if hasattr(self, '_status_item') and self._status_item.button:
-            self._status_item.button.setAttributedTitle_(attributed_title)
+            numeric = 0.0
+
+        units = self._units_normalized()
+        display_value = numeric if units == "mgdl" else round(numeric * 0.0555, 1)
+
+        # Choose number format based on thresholds.
+        low = float(self.preferences.get("low_threshold", 70))
+        high = float(self.preferences.get("high_threshold", 180))
+        if numeric < low:
+            number_format = self.style_settings.get("number_low", "%s")
+        elif numeric > high:
+            number_format = self.style_settings.get("number_high", "%s")
         else:
-            self.title = text
+            number_format = self.style_settings.get("number_normal", "%s")
+
+        number_text = number_format % display_value
+        arrow_symbol = self.get_arrow_symbol(trend_arrow)
+        if self.style_settings.get("show_brackets", True):
+            return f"[{number_text}][{arrow_symbol}]"
+        return f"{number_text} {arrow_symbol}"
+
+    def refresh_display(self):
+        # Recompute display from current values
+        if self.current_value is None:
+            self.title = "[--][?]"
+            return
+        text = self._format_display_text(self.current_value, self.current_trend_arrow)
+        self.refresh_display_with_text(text)
+
+    def refresh_display_with_text(self, text):
+        # Use plain text title for compatibility
+        self.title = text
 
     def persist_settings(self):
         settings = {
             "username": self.username,
-            "password": self.password,
+            # Do not store password in settings file
             "region": self.region,
             "style_settings": self.style_settings,
             "preferences": self.preferences
         }
         save_settings(settings)
 
-    # ----------------- New Methods for History, Prediction and Graphing -----------------
+    # ----------------- History, Prediction and Graphing -----------------
 
     def update_history(self, reading):
         """Append the current reading to a persistent history file."""
@@ -196,7 +268,7 @@ class DexcomMenuApp(rumps.App):
         else:
             history = []
         history.append(new_entry)
-        # Optionally keep only the latest 100 entries.
+        # Keep only the latest 100 entries.
         history = history[-100:]
         with open(history_file, "w") as f:
             json.dump(history, f, indent=4)

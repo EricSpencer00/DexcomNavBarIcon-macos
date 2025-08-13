@@ -1,7 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Build artifacts
+build/
+dist/
+*.dmg
+
+# App settings and caches (user-specific)
+settings.json
+*.log
+
+# Secrets
+.secret_key
+
 /venv
 .env
-/build
-/dist
 .DS_Store
 settings.json
 *.json
