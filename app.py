@@ -146,13 +146,15 @@ class DexcomMenuApp(rumps.App):
             urllib.request.urlopen(req, timeout=4)
             subprocess.Popen(["open", url])
         except Exception:
-            # Fallback: show local PRIVACY.md content
-            local_path = os.path.join(os.path.dirname(__file__), "PRIVACY.md")
+            # Fallback: show local PRIVACY.md content, or hardcoded if not available
             try:
+                import dialogs
+                local_path = os.path.join(os.path.dirname(__file__), "PRIVACY.md")
                 with open(local_path, "r", encoding="utf-8") as f:
                     content = f.read()
             except Exception:
-                content = "Privacy policy is unavailable offline."
+                import dialogs
+                content = dialogs.PRIVACY_POLICY_TEXT
             show_text_window("Privacy Policy", content)
 
     def authenticate(self):
