@@ -12,6 +12,17 @@ from Cocoa import (
     NSScrollView,
     NSTextView,
 )
+PRIVACY_POLICY_TEXT = """
+Privacy Policy (updated August 13, 2025)
+
+DexcomNavBarIcon does not collect, store, or transmit any personal information to the developer.
+
+Credentials: Your Dexcom username is stored locally in a settings file in your user Library. Your password is stored securely in your macOS Keychain. It is never written to disk in plaintext.
+Glucose data: Readings are retrieved from Dexcom only to display them in your menu bar. Recent readings may be cached locally on your computer. No data is transmitted to the developer.
+Network: The app connects only to Dexcom services via HTTPS through the official pydexcom library.
+Crash/Analytics: The app contains no analytics or crash reporting framework.
+Contact: ericspencer1450@gmail.com for any issues
+"""
 import logging
 
 
