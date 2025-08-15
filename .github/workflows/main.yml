@@ -1,5 +1,12 @@
 name: Build macOS DMG
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+  checks: write
+
 on:
   push:
     branches: [ main ]
@@ -64,7 +71,7 @@ jobs:
 
     - name: Push DMG to releases branch and tag
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       run: |
         git config --global user.name "github-actions"
         git config --global user.email "github-actions@github.com"
