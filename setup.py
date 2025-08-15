@@ -14,7 +14,7 @@ OPTIONS = {
     'argv_emulation': False,
     'packages': find_packages() + ['cffi'],
     'includes': ['cmath', 'chardet', 'cffi'],
-    'iconfile': 'resources/icon.icns',
+    'iconfile': 'icon.icns',
     'plist': {
         'CFBundleName': 'DexcomNavBarIcon',
         'CFBundleDisplayName': 'DexcomNavBarIcon',
