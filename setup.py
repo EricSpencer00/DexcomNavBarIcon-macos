@@ -8,7 +8,7 @@ from setuptools import setup, find_packages
 
 APP = ['main.py']
 DATA_FILES = [
-    ('resources', ['resources/icon.icns']),
+    ('resources', ['icon.icns']),
 ]
 OPTIONS = {
     'argv_emulation': False,
