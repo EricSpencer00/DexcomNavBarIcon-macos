@@ -61,3 +61,18 @@ jobs:
       with:
         name: DexcomNavBarIcon-dmg
         path: DexcomNavBarIcon.dmg
+
+    - name: Push DMG to releases branch and tag
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git config --global user.name "github-actions"
+        git config --global user.email "github-actions@github.com"
+        git fetch origin
+        git checkout -B releases
+        cp DexcomNavBarIcon.dmg DexcomNavBarIcon-1.0.0.dmg
+        git add DexcomNavBarIcon-1.0.0.dmg
+        git commit -m "Add DMG for v1.0.0 [ci skip]" || echo "No changes to commit"
+        git push origin releases
+        git tag v1.0.0 || echo "Tag already exists"
+        git push origin v1.0.0 || echo "Tag already pushed"
