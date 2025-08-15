@@ -71,7 +71,7 @@ jobs:
         git fetch origin
         git checkout -B releases
         cp DexcomNavBarIcon.dmg DexcomNavBarIcon-1.0.0.dmg
-        git add DexcomNavBarIcon-1.0.0.dmg
+        git add DexcomNavBarIcon-1.0.0.dmg -f
         git commit -m "Add DMG for v1.0.0 [ci skip]" || echo "No changes to commit"
         git push origin releases
         git tag v1.0.0 || echo "Tag already exists"
