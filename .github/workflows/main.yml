@@ -46,7 +46,7 @@ jobs:
         # Create DMG from the app bundle
         create-dmg \
           --volname "DexcomNavBarIcon" \
-          --volicon "icon.icns" \
+          --volicon "resources/icon.icns" \
           --window-pos 200 120 \
           --window-size 600 400 \
           --icon-size 100 \

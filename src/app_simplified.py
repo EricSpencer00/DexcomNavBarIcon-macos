@@ -10,10 +10,10 @@ from Cocoa import (
 from pydexcom import Dexcom
 from pydexcom.errors import AccountError
 
-from dialogs_simplified import get_credentials, get_units_preference
-from settings_simplified import load_settings, save_settings, DEFAULT_SETTINGS
-from utils_simplified import DexcomCache, check_internet, validate_reading
-from account_page_simplified import AccountPage
+from src.dialogs_simplified import get_credentials, get_units_preference
+from src.settings_simplified import load_settings, save_settings, DEFAULT_SETTINGS
+from src.utils_simplified import DexcomCache, check_internet, validate_reading
+from src.account_page_simplified import AccountPage
 
 class DexcomMenuApp(rumps.App):
     def __init__(self):
