@@ -21,9 +21,10 @@ OPTIONS = {
         'keyring.backends',
         'keyring.backends.OS_X',
         'keyring.backends.macOS',  # Ensure macOS Keychain backend is bundled
-        'charset_normalizer'
+        'charset_normalizer',
+        'zlib'
     ],
-    'packages': ['requests', 'pydexcom', 'matplotlib', 'numpy'],
+    'packages': ['requests', 'pydexcom'],
 }
 
 setup(

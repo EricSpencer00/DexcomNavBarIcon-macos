@@ -10,11 +10,6 @@ import re
 import urllib.request
 import urllib.error
 
-import matplotlib
-matplotlib.use('Agg')
-import numpy as np
-import matplotlib.pyplot as plt
-
 from Cocoa import (
     NSApplication, NSApplicationActivationPolicyAccessory, NSOperationQueue,
 )

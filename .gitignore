@@ -18,6 +18,7 @@ settings.json
 .secret_key
 
 /venv
+/venv39
 .env
 .DS_Store
 settings.json
