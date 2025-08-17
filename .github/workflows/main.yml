@@ -14,47 +14,29 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.9'
-        cache: 'pip'
+    - name: Download and install Python 3.9 universal2
+      run: |
+        curl -LO https://www.python.org/ftp/python/3.9.13/python-3.9.13-macos11.pkg
+        sudo installer -pkg python-3.9.13-macos11.pkg -target /
+        python3.9 --version
+        which python3.9
+        python3.9 -m pip install --upgrade pip
+        python3.9 -m pip install virtualenv
+        # Set up venv for build.sh if needed
+        echo "PYTHON_BIN=$(which python3.9)" >> $GITHUB_ENV
+        echo "PATH=/Library/Frameworks/Python.framework/Versions/3.9/bin:$PATH" >> $GITHUB_ENV
     
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install py2app
-        pip install rumps
-        pip install pydexcom
-        pip install setuptools
-        pip install pyobjc_framework_Cocoa
-        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-    
-    - name: Verify setup.py
-      run: |
-        python -m py_compile setup.py
-        
-    - name: Build application with py2app
-      run: |
-        python setup.py py2app
-        
-    - name: Create DMG
-      run: |
-        # Install create-dmg
-        brew install create-dmg
-        
-        # Create DMG from the app bundle
-        create-dmg \
-          --volname "DexcomNavBarIcon" \
-          --volicon "icon.icns" \
-          --window-pos 200 120 \
-          --window-size 600 400 \
-          --icon-size 100 \
-          --icon "DexcomNavBarIcon.app" 175 190 \
-          --hide-extension "DexcomNavBarIcon.app" \
-          --app-drop-link 425 190 \
-          "DexcomNavBarIcon.dmg" \
-          "dist/DexcomNavBarIcon.app"
+    - name: Make build.sh executable
+      run: chmod +x build.sh
+
+    - name: Run build.sh (build, sign, notarize, create DMG)
+      env:
+        NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+        NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+        NOTARIZE_APP_SPECIFIC_PASSWORD: ${{ secrets.NOTARIZE_APP_SPECIFIC_PASSWORD }}
+        PYTHON_BIN: ${{ env.PYTHON_BIN }}
+        PATH: ${{ env.PATH }}
+      run: ./build.sh
     
     - name: Upload DMG artifact
       uses: actions/upload-artifact@v4

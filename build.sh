@@ -3,6 +3,12 @@
 # Ensure the script exits if any command fails
 set -e
 
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+fi
+
 APP_NAME="DexcomNavBarIcon"
 APP_BUNDLE_ID="com.ericspencer.dexcomnavbaricon"
 APP_PATH="dist/${APP_NAME}.app"
@@ -11,20 +17,39 @@ PKG_NAME="${APP_NAME}.pkg"
 ENTITLEMENTS="entitlements.plist"
 
 # Certificate placeholders (replace before running for MAS builds)
-APP_CERT="3rd Party Mac Developer Application: Eric Spencer (QAWD9U9CF6)"
-INSTALLER_CERT="3rd Party Mac Developer Installer: Eric Spencer (QAWD9U9CF6)"
+APP_CERT="Developer ID Application: Eric Spencer (QAWD9U9CF6)"
+INSTALLER_CERT="Developer ID Installer: Eric Spencer (QAWD9U9CF6)"
 
 # Step 1: Clean previous builds
 echo "Cleaning previous builds..."
-rm -rf build dist "$DMG_NAME" "$PKG_NAME"
+rm -rf build dist "$DMG_NAME" "$PKG_NAME" venv_universal
 
-# Step 2: Build the application with py2app
-python3.9 -m venv venv39
-source venv39/bin/activate
-echo "Installing required dependencies..."
+# Step 2: Set up virtual environment ONCE
+python3.9 -m venv venv_universal
+source venv_universal/bin/activate
 python3.9 -m pip install --upgrade pip
 python3.9 -m pip install -r requirements.txt
-echo "Building the application with py2app..."
+
+# Step 2: Check for required tools and files
+echo "Checking for required tools and files..."
+if ! command -v python3.9 >/dev/null 2>&1; then
+  echo "Error: python3.9 not found. Please install the official universal2 Python 3.9+ from python.org." >&2
+  exit 1
+fi
+if ! python3.9 -c "import platform; print(platform.machine())" 2>/dev/null | grep -Eq 'x86_64|arm64'; then
+  echo "Warning: Your python3.9 may not be the official universal2 build. Universal2 is required for both Intel and Apple Silicon support." >&2
+fi
+if ! python3.9 -m pip show py2app >/dev/null 2>&1; then
+  echo "Error: py2app is not installed in python3.9. Run: python3.9 -m pip install py2app" >&2
+  exit 1
+fi
+if [ ! -f requirements.txt ]; then
+  echo "Error: requirements.txt not found in project root." >&2
+  exit 1
+fi
+
+# Step 3: Build the universal2 app
+echo "Building universal2 (Intel + Apple Silicon) version..."
 python3.9 setup.py py2app
 
 # Step 3: Verify the built application exists
@@ -34,24 +59,24 @@ if [ ! -d "$APP_PATH" ]; then
 fi
 
 
-# Sign all .so and .dylib files in Resources and Frameworks
+# Sign all .so and .dylib files in Resources and Frameworks (no entitlements)
 echo "Signing all .so and .dylib files in Resources and Frameworks..."
 if security find-identity -v -p codesigning | grep -q "$APP_CERT"; then
   find "$APP_PATH/Contents/Resources" -name "*.so" -or -name "*.dylib" | while read -r f; do
-    codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$APP_CERT" "$f"
+    codesign --force --options runtime --sign "$APP_CERT" "$f"
   done
   if [ -d "$APP_PATH/Contents/Frameworks" ]; then
     find "$APP_PATH/Contents/Frameworks" -name "*.so" -or -name "*.dylib" | while read -r f; do
-      codesign --force --options runtime --entitlements "$ENTITLEMENTS" --sign "$APP_CERT" "$f"
+      codesign --force --options runtime --sign "$APP_CERT" "$f"
     done
   fi
   # Now sign the main app bundle
-  echo "Code signing app bundle (MAS)..."
+  echo "Code signing app bundle (Developer ID)..."
   codesign --force --deep --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign "$APP_CERT" "$APP_PATH"
 else
-  echo "Warning: App Store signing certificate not found. Skipping signing."
+  echo "Warning: Developer ID Application certificate not found. Skipping signing."
 fi
 
 # Verify signature (if signed)
@@ -61,26 +86,48 @@ else
   echo "Warning: codesign verification failed or app not signed."
 fi
 
-# Step 4: Create the DMG using hdiutil
-echo "Creating DMG..."
+
+# Step 5: Create the DMG using hdiutil
+echo "Creating DMG for universal2 app..."
 hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_NAME"
+
 
 # Optionally create a signed installer package for App Store upload
 # Note: App Store typically requires submission via Xcode or Transporter with a signed app archive.
 # The following can help validate entitlements in a pkg, but use at your discretion.
-if security find-identity -v -p codesigning | grep -q "$INSTALLER_CERT"; then
-  echo "Building signed installer package..."
-  productbuild --component "$APP_PATH" \
-    "/Applications" \
-    --sign "$INSTALLER_CERT" \
-    --product "" \
-    "$PKG_NAME" || echo "productbuild failed; ensure correct certificate and product definition."
+if [ "$CREATE_PKG" = "1" ]; then
+  echo "Looking for installer signing identity: $INSTALLER_CERT"
+  security find-identity -v -p codesigning
+  if security find-identity -v -p codesigning | grep -Fxq "$INSTALLER_CERT"; then
+    echo "Building signed installer package..."
+    productbuild --component "$APP_PATH" \
+      "/Applications" \
+      --sign "$INSTALLER_CERT" \
+      "$PKG_NAME" || echo "productbuild failed; ensure correct certificate and product definition."
+  else
+    echo "Note: Installer signing certificate not found. Skipping pkg creation."
+  fi
 else
-  echo "Note: Installer signing certificate not found. Skipping pkg creation."
+  echo "Skipping .pkg creation (set CREATE_PKG=1 to enable)."
 fi
 
-echo "Build and packaging complete. DMG located at ${DMG_NAME}"
+# Step 6: Notarize the DMG (required for GitHub distribution)
+if [ -n "$NOTARIZE_APPLE_ID" ] && [ -n "$NOTARIZE_TEAM_ID" ] && [ -n "$NOTARIZE_APP_SPECIFIC_PASSWORD" ]; then
+  echo "Submitting DMG for notarization..."
+  xcrun notarytool submit "$DMG_NAME" \
+    --apple-id "$NOTARIZE_APPLE_ID" \
+    --team-id "$NOTARIZE_TEAM_ID" \
+    --password "$NOTARIZE_APP_SPECIFIC_PASSWORD" \
+    --wait
+  echo "Stapling notarization ticket to DMG..."
+  xcrun stapler staple "$DMG_NAME"
+  echo "Notarization complete."
+else
+  echo "Notarization skipped. Set NOTARIZE_APPLE_ID, NOTARIZE_TEAM_ID, and NOTARIZE_APP_SPECIFIC_PASSWORD env vars to enable."
+fi
 
-# Step 5: Clean up virtual environment
-deactivate
-rm -rf venv
+echo "Build and packaging complete."
+echo "DMG created: ${DMG_NAME} (universal2: Intel + Apple Silicon)"
+
+# Step 7: Clean up virtual environment
+rm -rf venv_universal

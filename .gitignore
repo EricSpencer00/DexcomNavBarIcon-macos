@@ -19,6 +19,9 @@ settings.json
 
 /venv
 /venv39
+/venv39_arm64
+/venv39_x86
+/venv_universal
 .env
 .DS_Store
 settings.json
