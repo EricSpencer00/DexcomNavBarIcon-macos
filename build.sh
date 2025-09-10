@@ -24,23 +24,25 @@ INSTALLER_CERT="Developer ID Installer: Eric Spencer (QAWD9U9CF6)"
 echo "Cleaning previous builds..."
 rm -rf build dist "$DMG_NAME" "$PKG_NAME" venv_universal
 
-# Step 2: Set up virtual environment ONCE
-python3.9 -m venv venv_universal
+# Step 2: Set up virtual environment ONCE (prefer PYTHON_BIN if provided)
+PY_BIN="${PYTHON_BIN:-python3.9}"
+echo "Using Python: ${PY_BIN}"
+"${PY_BIN}" -m venv venv_universal
 source venv_universal/bin/activate
-python3.9 -m pip install --upgrade pip
-python3.9 -m pip install -r requirements.txt
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
 
 # Step 2: Check for required tools and files
 echo "Checking for required tools and files..."
-if ! command -v python3.9 >/dev/null 2>&1; then
-  echo "Error: python3.9 not found. Please install the official universal2 Python 3.9+ from python.org." >&2
+if ! command -v "${PY_BIN}" >/dev/null 2>&1; then
+  echo "Error: ${PY_BIN} not found. Please install the official universal2 Python 3.9+ from python.org." >&2
   exit 1
 fi
-if ! python3.9 -c "import platform; print(platform.machine())" 2>/dev/null | grep -Eq 'x86_64|arm64'; then
+if ! "${PY_BIN}" -c "import platform; print(platform.machine())" 2>/dev/null | grep -Eq 'x86_64|arm64'; then
   echo "Warning: Your python3.9 may not be the official universal2 build. Universal2 is required for both Intel and Apple Silicon support." >&2
 fi
-if ! python3.9 -m pip show py2app >/dev/null 2>&1; then
-  echo "Error: py2app is not installed in python3.9. Run: python3.9 -m pip install py2app" >&2
+if ! python -m pip show py2app >/dev/null 2>&1; then
+  echo "Error: py2app is not installed in the venv. Run: python -m pip install py2app" >&2
   exit 1
 fi
 if [ ! -f requirements.txt ]; then
@@ -50,7 +52,8 @@ fi
 
 # Step 3: Build the universal2 app
 echo "Building universal2 (Intel + Apple Silicon) version..."
-python3.9 setup.py py2app
+# If APP_VERSION is provided, it will be embedded via setup.py plist
+python setup.py py2app
 
 # Step 3: Verify the built application exists
 if [ ! -d "$APP_PATH" ]; then
@@ -61,6 +64,7 @@ fi
 
 # Sign all .so and .dylib files in Resources and Frameworks (no entitlements)
 echo "Signing all .so and .dylib files in Resources and Frameworks..."
+SIGNED=0
 if security find-identity -v -p codesigning | grep -q "$APP_CERT"; then
   find "$APP_PATH/Contents/Resources" -name "*.so" -or -name "*.dylib" | while read -r f; do
     codesign --force --options runtime --sign "$APP_CERT" "$f"
@@ -75,6 +79,7 @@ if security find-identity -v -p codesigning | grep -q "$APP_CERT"; then
   codesign --force --deep --options runtime \
     --entitlements "$ENTITLEMENTS" \
     --sign "$APP_CERT" "$APP_PATH"
+  SIGNED=1
 else
   echo "Warning: Developer ID Application certificate not found. Skipping signing."
 fi
@@ -111,8 +116,8 @@ else
   echo "Skipping .pkg creation (set CREATE_PKG=1 to enable)."
 fi
 
-# Step 6: Notarize the DMG (required for GitHub distribution)
-if [ -n "$NOTARIZE_APPLE_ID" ] && [ -n "$NOTARIZE_TEAM_ID" ] && [ -n "$NOTARIZE_APP_SPECIFIC_PASSWORD" ]; then
+# Step 6: Notarize the DMG (optional; only if signed and creds present)
+if [ "$SIGNED" = "1" ] && [ -n "$NOTARIZE_APPLE_ID" ] && [ -n "$NOTARIZE_TEAM_ID" ] && [ -n "$NOTARIZE_APP_SPECIFIC_PASSWORD" ]; then
   echo "Submitting DMG for notarization..."
   xcrun notarytool submit "$DMG_NAME" \
     --apple-id "$NOTARIZE_APPLE_ID" \
@@ -123,7 +128,7 @@ if [ -n "$NOTARIZE_APPLE_ID" ] && [ -n "$NOTARIZE_TEAM_ID" ] && [ -n "$NOTARIZE_
   xcrun stapler staple "$DMG_NAME"
   echo "Notarization complete."
 else
-  echo "Notarization skipped. Set NOTARIZE_APPLE_ID, NOTARIZE_TEAM_ID, and NOTARIZE_APP_SPECIFIC_PASSWORD env vars to enable."
+  echo "Notarization skipped. Ensure app is signed and notarization credentials are set."
 fi
 
 echo "Build and packaging complete."

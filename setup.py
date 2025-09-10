@@ -2,10 +2,13 @@
 setup.py
 Usage: python setup.py py2app
 """
+import os
 from setuptools import setup
 
 APP = ['main.py']
 DATA_FILES = ['icon.icns']
+VERSION = os.environ.get("APP_VERSION")
+
 OPTIONS = {
     'iconfile': 'icon.icns',
     'plist': {
@@ -14,6 +17,10 @@ OPTIONS = {
         'LSUIElement': True,  # Agent app, hides from Dock
         'NSHumanReadableCopyright': '© 2025 Eric Spencer',
         'LSApplicationCategoryType': 'public.app-category.healthcare-fitness',
+        **({
+            'CFBundleShortVersionString': VERSION,
+            'CFBundleVersion': VERSION,
+        } if VERSION else {}),
     },
     'excludes': ['tkinter', 'pytest', 'tests'],
     'includes': [

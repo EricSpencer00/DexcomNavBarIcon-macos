@@ -295,6 +295,10 @@ class DexcomMenuApp(rumps.App):
         if not os.path.exists(history_file):
             return []
         try:
+            import numpy as np  # optional dependency
+        except Exception:
+            return []
+        try:
             with open(history_file, "r") as f:
                 history = json.load(f)
         except Exception:
@@ -321,6 +325,11 @@ class DexcomMenuApp(rumps.App):
         """Generate and save a graph of past glucose readings and predicted future values."""
         history_file = os.path.join(get_settings_dir(), "glucose_history.json")
         if not os.path.exists(history_file):
+            return None
+        try:
+            import numpy as np  # optional dependency
+            import matplotlib.pyplot as plt  # optional dependency
+        except Exception:
             return None
         try:
             with open(history_file, "r") as f:

@@ -1,9 +1,11 @@
 # Ensure these are bundled for requests and keyring
 chardet
 charset_normalizer
-keyring
 pydexcom==0.4.1
 rumps==0.4.0
 setuptools==58.0.4
 keyring==24.3.1
 py2app==0.28
+pyobjc==10.2
+pyobjc-core==10.2
+pyobjc-framework-Cocoa==10.2

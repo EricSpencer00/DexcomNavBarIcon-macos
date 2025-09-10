@@ -1,45 +1,91 @@
-name: Build macOS DMG
+name: Build & Audit macOS DMG (universal2)
 
 on:
   push:
-    branches: [ ]
+    branches: []
   pull_request:
-    branches: [ ]
+    branches: []
   workflow_dispatch:  # Allows manual triggering
+    inputs:
+      app_version:
+        description: "Override app version (e.g., 1.2.3)"
+        required: false
+        type: string
 
 jobs:
   build:
-    runs-on: macos-latest
-    
-    steps:
-    - uses: actions/checkout@v3
-    
-    - name: Download and install Python 3.9 universal2
-      run: |
-        curl -LO https://www.python.org/ftp/python/3.9.13/python-3.9.13-macos11.pkg
-        sudo installer -pkg python-3.9.13-macos11.pkg -target /
-        python3.9 --version
-        which python3.9
-        python3.9 -m pip install --upgrade pip
-        python3.9 -m pip install virtualenv
-        # Set up venv for build.sh if needed
-        echo "PYTHON_BIN=$(which python3.9)" >> $GITHUB_ENV
-        echo "PATH=/Library/Frameworks/Python.framework/Versions/3.9/bin:$PATH" >> $GITHUB_ENV
-    
-    - name: Make build.sh executable
-      run: chmod +x build.sh
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14]
 
-    - name: Run build.sh (build, sign, notarize, create DMG)
-      env:
-        NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
-        NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
-        NOTARIZE_APP_SPECIFIC_PASSWORD: ${{ secrets.NOTARIZE_APP_SPECIFIC_PASSWORD }}
-        PYTHON_BIN: ${{ env.PYTHON_BIN }}
-        PATH: ${{ env.PATH }}
-      run: ./build.sh
-    
-    - name: Upload DMG artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: DexcomNavBarIcon-dmg
-        path: DexcomNavBarIcon.dmg
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine runner arch
+        id: arch
+        run: |
+          uname -a
+          echo "arch=$(uname -m)" >> $GITHUB_OUTPUT
+
+      - name: Download and install Python 3.9 universal2
+        run: |
+          curl -LO https://www.python.org/ftp/python/3.9.13/python-3.9.13-macos11.pkg
+          sudo installer -pkg python-3.9.13-macos11.pkg -target /
+          /Library/Frameworks/Python.framework/Versions/3.9/bin/python3 -V
+          echo "PYTHON_BIN=/Library/Frameworks/Python.framework/Versions/3.9/bin/python3" >> $GITHUB_ENV
+          echo "/Library/Frameworks/Python.framework/Versions/3.9/bin" >> $GITHUB_PATH
+
+      - name: Set APP_VERSION
+        id: setver
+        run: |
+          set -e
+          # Priority: workflow input > tag name (strip v) > repo variable > fallback
+          INPUT_VER='${{ github.event.inputs.app_version }}'
+          if [[ -n "$INPUT_VER" ]]; then
+            VER="$INPUT_VER"
+          elif [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VTAG="${GITHUB_REF_NAME}"
+            VER="${VTAG#v}"
+          elif [[ -n "${{ vars.APP_VERSION }}" ]]; then
+            VER='${{ vars.APP_VERSION }}'
+          else
+            # Use date+sha for CI builds
+            VER="0.0.0+ci-$(date +%Y%m%d)-${GITHUB_SHA::7}"
+          fi
+          echo "APP_VERSION=$VER" | tee -a "$GITHUB_ENV"
+          echo "version=$VER" >> $GITHUB_OUTPUT
+
+      - name: Pre-build smoke test (imports)
+        run: |
+          "$PYTHON_BIN" -m pip install --upgrade pip
+          "$PYTHON_BIN" -m pip install -r requirements.txt
+          "$PYTHON_BIN" -c "import platform; import rumps; import Cocoa; import keyring; import pydexcom; print('OK', platform.platform(), platform.machine())"
+
+      - name: Make build.sh executable
+        run: chmod +x build.sh
+
+      - name: Build DMG (universal2)
+        env:
+          NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+          NOTARIZE_APP_SPECIFIC_PASSWORD: ${{ secrets.NOTARIZE_APP_SPECIFIC_PASSWORD }}
+          PYTHON_BIN: ${{ env.PYTHON_BIN }}
+          APP_VERSION: ${{ env.APP_VERSION }}
+        run: ./build.sh
+
+      - name: Verify built app architectures
+        if: always()
+        run: |
+          bash ci/verify_app_universal.sh "dist/DexcomNavBarIcon.app"
+        shell: bash
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DexcomNavBarIcon-${{ matrix.os }}-${{ steps.arch.outputs.arch }}
+          path: |
+            DexcomNavBarIcon.dmg
+            dist/DexcomNavBarIcon.app
