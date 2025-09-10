@@ -67,18 +67,23 @@ echo "Signing all .so and .dylib files in Resources and Frameworks..."
 SIGNED=0
 if security find-identity -v -p codesigning | grep -q "$APP_CERT"; then
   find "$APP_PATH/Contents/Resources" -name "*.so" -or -name "*.dylib" | while read -r f; do
-    codesign --force --options runtime --sign "$APP_CERT" "$f"
+    codesign --force --options runtime --timestamp --sign "$APP_CERT" "$f"
   done
   if [ -d "$APP_PATH/Contents/Frameworks" ]; then
     find "$APP_PATH/Contents/Frameworks" -name "*.so" -or -name "*.dylib" | while read -r f; do
-      codesign --force --options runtime --sign "$APP_CERT" "$f"
+      codesign --force --options runtime --timestamp --sign "$APP_CERT" "$f"
     done
   fi
   # Now sign the main app bundle
   echo "Code signing app bundle (Developer ID)..."
-  codesign --force --deep --options runtime \
-    --entitlements "$ENTITLEMENTS" \
-    --sign "$APP_CERT" "$APP_PATH"
+  if [ "${USE_SANDBOX:-0}" = "1" ] && [ -f "$ENTITLEMENTS" ]; then
+    codesign --force --deep --options runtime --timestamp \
+      --entitlements "$ENTITLEMENTS" \
+      --sign "$APP_CERT" "$APP_PATH"
+  else
+    codesign --force --deep --options runtime --timestamp \
+      --sign "$APP_CERT" "$APP_PATH"
+  fi
   SIGNED=1
 else
   echo "Warning: Developer ID Application certificate not found. Skipping signing."
@@ -126,6 +131,8 @@ if [ "$SIGNED" = "1" ] && [ -n "$NOTARIZE_APPLE_ID" ] && [ -n "$NOTARIZE_TEAM_ID
     --wait
   echo "Stapling notarization ticket to DMG..."
   xcrun stapler staple "$DMG_NAME"
+  echo "Attempting to staple app bundle..."
+  xcrun stapler staple "$APP_PATH" || true
   echo "Notarization complete."
 else
   echo "Notarization skipped. Ensure app is signed and notarization credentials are set."
