@@ -1,6 +1,7 @@
 # app.py
 import rumps
 import threading
+import time
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from Cocoa import (
@@ -173,9 +174,11 @@ class DexcomMenuApp(rumps.App):
             print(f"Current value: {self.current_value}, Trend: {self.current_trend_arrow}")
             
             # Cache the successful reading
+            # Save reading with timestamp so we can determine age later
             self.cache.save({
                 "value": reading.value,
-                "trend_arrow": reading.trend_arrow
+                "trend_arrow": reading.trend_arrow,
+                "timestamp": int(time.time())
             })
             print("Reading cached")
             
@@ -188,9 +191,9 @@ class DexcomMenuApp(rumps.App):
                     pass
                 
             number_format = self.style_settings["number_format"]
-            arrow_symbol = self.get_arrow_symbol(self.current_trend_arrow)
-                
             number_text = number_format % display_value
+            # Fresh reading (we just fetched it) -> timestamp is now, arrow is valid
+            arrow_symbol = self.get_arrow_symbol(self.current_trend_arrow)
             if self.style_settings.get("show_brackets", True):
                 display_text = f"[{number_text}][{arrow_symbol}]"
             else:
@@ -207,9 +210,10 @@ class DexcomMenuApp(rumps.App):
             cached_data = self.cache.get()
             if cached_data:
                 print("Using cached data due to fetch error")
-                self.current_value = cached_data["value"]
-                self.current_trend_arrow = cached_data["trend_arrow"]
-                
+                self.current_value = cached_data.get("value")
+                self.current_trend_arrow = cached_data.get("trend_arrow")
+                cached_ts = cached_data.get("timestamp")
+
                 # Convert to mmol/L if needed
                 display_value = self.current_value
                 if self.preferences["units"] == "mmol/L":
@@ -217,17 +221,38 @@ class DexcomMenuApp(rumps.App):
                         display_value = round(float(self.current_value) / 18.0, 1)
                     except:
                         pass
-                
-                arrow_symbol = self.get_arrow_symbol(self.current_trend_arrow)
-                display_text = f"[{display_value}][{arrow_symbol}]"
-                
+
+                # If we have a timestamp for the cached reading, show 'Xmin: N' as last known
+                now_ts = int(time.time())
+                age_min = None
+                if cached_ts:
+                    try:
+                        age_min = int((now_ts - int(cached_ts)) / 60)
+                    except Exception:
+                        age_min = None
+
+                # Only show arrow if the reading is <= 5 minutes old
+                arrow_symbol = ""
+                if age_min is None or age_min <= 5:
+                    arrow_symbol = self.get_arrow_symbol(self.current_trend_arrow)
+
+                if age_min is not None:
+                    # show last-known format: '10min: 132' (omit arrow for stale >5min)
+                    if arrow_symbol:
+                        display_text = f"{age_min}min: {display_value} {arrow_symbol}"
+                    else:
+                        display_text = f"{age_min}min: {display_value}"
+                else:
+                    # Fallback to a bracketed display when we don't know age
+                    display_text = f"[{display_value}][{arrow_symbol or '?'}]"
+
                 NSOperationQueue.mainQueue().addOperationWithBlock_(
                     lambda: self.refresh_display_with_text(display_text)
                 )
             else:
                 print("No cached data available")
                 NSOperationQueue.mainQueue().addOperationWithBlock_(
-                    lambda: self.refresh_display_with_text("[Err][?]")
+                    lambda: self.refresh_display_with_text("[--][?]")
                 )
 
     def get_arrow_symbol(self, trend_arrow):

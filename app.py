@@ -199,12 +199,49 @@ class DexcomMenuApp(rumps.App):
                 self.current_trend_arrow = getattr(reading, "trend_arrow", None)
                 # No local persistence of history per requirement
                 # Prepare display text
+                # Save a cached snapshot (if cache implementation exists) with timestamp
+                try:
+                    if hasattr(self, 'cache') and self.cache:
+                        self.cache.save({
+                            'value': reading.value,
+                            'trend_arrow': getattr(reading, 'trend_arrow', None),
+                            'timestamp': int(time.time())
+                        })
+                except Exception:
+                    pass
+
                 display_text = self._format_display_text(self.current_value, self.current_trend_arrow)
             else:
                 display_text = "[N/A][?]"
         except Exception as e:
             logging.error("Error fetching Dexcom data: %s", e)
+            # On error, try using cached data if available and present age
             display_text = "[Err][?]"
+            try:
+                cached = None
+                if hasattr(self, 'cache') and self.cache:
+                    cached = self.cache.get()
+                if cached:
+                    val = cached.get('value')
+                    ts = cached.get('timestamp')
+                    arrow = cached.get('trend_arrow')
+                    now_ts = int(time.time())
+                    age_min = None
+                    if ts:
+                        age_min = int((now_ts - int(ts)) / 60)
+                    # Only show arrow if <=5 minutes old
+                    arrow_symbol = ''
+                    if age_min is None or age_min <= 5:
+                        arrow_symbol = self.get_arrow_symbol(arrow)
+                    if age_min is not None:
+                        if arrow_symbol:
+                            display_text = f"{age_min}min: {val} {arrow_symbol}"
+                        else:
+                            display_text = f"{age_min}min: {val}"
+                    else:
+                        display_text = f"[{val}][{arrow_symbol or '?'}]"
+            except Exception:
+                pass
 
         NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.refresh_display_with_text(display_text))
 
