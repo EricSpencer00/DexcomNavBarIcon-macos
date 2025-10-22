@@ -25,11 +25,25 @@ echo "Cleaning previous builds..."
 rm -rf build dist "$DMG_NAME" "$PKG_NAME" venv_universal
 
 # Step 2: Set up virtual environment ONCE (prefer PYTHON_BIN if provided)
-PY_BIN="${PYTHON_BIN:-python3.9}"
+PY_BIN="${PYTHON_BIN:-python3.11}"
 echo "Using Python: ${PY_BIN}"
+
+# Verify the chosen python exists before attempting to create a venv
+if ! command -v "${PY_BIN}" >/dev/null 2>&1; then
+  echo "Error: ${PY_BIN} not found. Please install a compatible Python (recommend python.org universal2 3.11+) and set PYTHON_BIN to its path." >&2
+  exit 1
+fi
+
 "${PY_BIN}" -m venv venv_universal
 source venv_universal/bin/activate
-python -m pip install --upgrade pip
+python -m pip install --upgrade pip setuptools wheel
+
+# Try to pull prebuilt pyobjc wheels first to avoid building from source on macOS.
+# If this fails we'll still attempt to install the rest of requirements and surface the error.
+echo "Attempting to install pyobjc wheels (prefer-binary) to avoid source builds..."
+pip install --prefer-binary pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-Quartz pyobjc || true
+
+echo "Installing requirements..."
 python -m pip install -r requirements.txt
 
 # Step 2: Check for required tools and files
