@@ -18,8 +18,8 @@ else
   echo "Warning: Main binary not found at $BIN"
 fi
 
-PYFRAME="$APP_PATH/Contents/Frameworks/Python.framework/Versions/3.9/Python"
-if [[ -f "$PYFRAME" ]]; then
+PYFRAME="$(ls -d "$APP_PATH"/Contents/Frameworks/Python.framework/Versions/3.*/Python 2>/dev/null | head -n1 || true)"
+if [[ -n "$PYFRAME" && -f "$PYFRAME" ]]; then
   echo "Embedded Python architectures:"
   lipo -info "$PYFRAME" || true
   file "$PYFRAME" || true

@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14]
+        os: [macos-15-intel, macos-14]
 
     steps:
       - uses: actions/checkout@v4
@@ -30,13 +30,13 @@ jobs:
           uname -a
           echo "arch=$(uname -m)" >> $GITHUB_OUTPUT
 
-      - name: Download and install Python 3.9 universal2
+      - name: Download and install Python 3.11 universal2
         run: |
-          curl -LO https://www.python.org/ftp/python/3.9.13/python-3.9.13-macos11.pkg
-          sudo installer -pkg python-3.9.13-macos11.pkg -target /
-          /Library/Frameworks/Python.framework/Versions/3.9/bin/python3 -V
-          echo "PYTHON_BIN=/Library/Frameworks/Python.framework/Versions/3.9/bin/python3" >> $GITHUB_ENV
-          echo "/Library/Frameworks/Python.framework/Versions/3.9/bin" >> $GITHUB_PATH
+          curl -LO https://www.python.org/ftp/python/3.11.9/python-3.11.9-macos11.pkg
+          sudo installer -pkg python-3.11.9-macos11.pkg -target /
+          /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -V
+          echo "PYTHON_BIN=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3" >> $GITHUB_ENV
+          echo "/Library/Frameworks/Python.framework/Versions/3.11/bin" >> $GITHUB_PATH
 
       - name: Set APP_VERSION
         id: setver
