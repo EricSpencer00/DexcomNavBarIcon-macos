@@ -71,23 +71,32 @@ jobs:
         if: env.SKIP_SIGN != '1'
         env:
           P12_APP_BASE64: ${{ secrets.DEV_ID_APP_P12_BASE64 }}
+          P12_DEV_ID_BASE64: ${{ secrets.MACOS_DEV_ID_P12_BASE64 }}
           P12_INSTALLER_BASE64: ${{ secrets.DEV_ID_INSTALLER_P12_BASE64 }}
           P12_PASSWORD: ${{ secrets.MACOS_DEV_ID_PASSWORD }}
+          P12_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
         run: |
           set -e
-          if [[ -z "$P12_APP_BASE64" ]]; then
+          if [[ -z "$P12_APP_BASE64" && -z "$P12_DEV_ID_BASE64" ]]; then
             echo "No signing cert secret; skipping import."; exit 0; fi
           KEYCHAIN="build.keychain"
           security create-keychain -p "" "$KEYCHAIN"
           security set-keychain-settings "$KEYCHAIN"
           security unlock-keychain -p "" "$KEYCHAIN"
-          echo "$P12_APP_BASE64" | base64 --decode > app_cert.p12
-          security import app_cert.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -A || exit 1
-          if [[ -n "$P12_INSTALLER_BASE64" ]]; then
-            echo "$P12_INSTALLER_BASE64" | base64 --decode > installer_cert.p12
-            security import installer_cert.p12 -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/productbuild -A || true
-          fi
+          import_p12() {
+            local b64="$1" name="$2"
+            [[ -z "$b64" ]] && return 0
+            echo "$b64" | base64 --decode > "$name.p12"
+            security import "$name.p12" -k "$KEYCHAIN" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -A \
+              || security import "$name.p12" -k "$KEYCHAIN" -P "$P12_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/productbuild -A \
+              || echo "Import failed for $name (wrong password?)"
+            rm -f "$name.p12"
+          }
+          import_p12 "$P12_DEV_ID_BASE64" dev_id_cert
+          import_p12 "$P12_APP_BASE64" app_cert
+          import_p12 "$P12_INSTALLER_BASE64" installer_cert
           security list-keychains -s "$KEYCHAIN" $(security list-keychains | sed 's/\"//g')
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$KEYCHAIN" >/dev/null
           security find-identity -v -p codesigning
 
       - name: Build DMG (universal2)
