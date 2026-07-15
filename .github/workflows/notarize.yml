@@ -1,0 +1,57 @@
+name: Notarize release DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag whose DMG asset should be notarized and stapled"
+        required: true
+        type: string
+      asset:
+        description: "DMG asset filename"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  notarize:
+    runs-on: macos-14
+    steps:
+      - name: Download DMG from release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "${{ inputs.tag }}" -R "${{ github.repository }}" -p "${{ inputs.asset }}"
+          ls -lh "${{ inputs.asset }}"
+
+      - name: Notarize and staple
+        env:
+          NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
+          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+          NOTARIZE_APP_SPECIFIC_PASSWORD: ${{ secrets.NOTARIZE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          xcrun notarytool submit "${{ inputs.asset }}" \
+            --apple-id "$NOTARIZE_APPLE_ID" \
+            --team-id "$NOTARIZE_TEAM_ID" \
+            --password "$NOTARIZE_APP_SPECIFIC_PASSWORD" \
+            --wait --output-format json | tee notarize_result.json
+          STATUS=$(python3 -c "import json;print(json.load(open('notarize_result.json'))['status'])")
+          if [[ "$STATUS" != "Accepted" ]]; then
+            SUB_ID=$(python3 -c "import json;print(json.load(open('notarize_result.json'))['id'])")
+            xcrun notarytool log "$SUB_ID" \
+              --apple-id "$NOTARIZE_APPLE_ID" \
+              --team-id "$NOTARIZE_TEAM_ID" \
+              --password "$NOTARIZE_APP_SPECIFIC_PASSWORD" || true
+            echo "Notarization status: $STATUS" >&2
+            exit 1
+          fi
+          xcrun stapler staple "${{ inputs.asset }}"
+          xcrun stapler validate "${{ inputs.asset }}"
+
+      - name: Upload stapled DMG back to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ inputs.tag }}" "${{ inputs.asset }}" -R "${{ github.repository }}" --clobber
