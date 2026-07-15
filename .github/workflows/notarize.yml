@@ -29,7 +29,8 @@ jobs:
       - name: Notarize and staple
         env:
           NOTARIZE_APPLE_ID: ${{ secrets.NOTARIZE_APPLE_ID }}
-          NOTARIZE_TEAM_ID: ${{ secrets.NOTARIZE_TEAM_ID }}
+          # Team of the Developer ID Application cert used to sign the DMG
+          NOTARIZE_TEAM_ID: QAWD9U9CF6
           NOTARIZE_APP_SPECIFIC_PASSWORD: ${{ secrets.NOTARIZE_APP_SPECIFIC_PASSWORD }}
         run: |
           xcrun notarytool submit "${{ inputs.asset }}" \
