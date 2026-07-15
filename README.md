@@ -21,4 +21,4 @@ Usage:
 
 Screenshots
 
-![Screenshot](https://github.com/user-attachments/assets/f547bb49-6a3d-4d2d-a4f2-07099d0cc680)
+<img width="551" height="38" alt="Screenshot 2026-07-15 at 10 57 23 AM" src="https://github.com/user-attachments/assets/0a5a92e8-5b64-4a8b-b194-c0100470703b" />
