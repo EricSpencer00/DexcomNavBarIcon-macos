@@ -193,7 +193,16 @@ class DexcomMenuApp(rumps.App):
                 NSOperationQueue.mainQueue().addOperationWithBlock_(lambda: self.refresh_display_with_text("[--][?]"))
                 return
         try:
-            reading = self.dexcom.get_current_glucose_reading()
+            try:
+                reading = self.dexcom.get_current_glucose_reading()
+            except Exception as e:
+                # Session likely expired; rebuild it and retry once
+                logging.warning("Fetch failed (%s); re-authenticating and retrying", e)
+                self.dexcom = None
+                self.authenticate()
+                if not self.dexcom:
+                    raise
+                reading = self.dexcom.get_current_glucose_reading()
             if reading is not None:
                 self.current_value = reading.value
                 self.current_trend_arrow = getattr(reading, "trend_arrow", None)
